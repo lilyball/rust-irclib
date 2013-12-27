@@ -1,0 +1,3 @@
+[submodule "rust-lua"]
+	path = rust-lua
+	url = https://github.com/kballard/rust-lua.git

@@ -1,7 +1,7 @@
 include rust-lua/common.mk
 RUST_LUA := rust-lua/$(LIBNAME)
 
-LIBNAME := $(shell rustc --crate-file-name irc.rs)
+LIBNAME := $(shell rustc --crate-file-name lib.rs)
 
 .PHONY: all clean
 .DEFAULT: all
@@ -9,9 +9,9 @@ LIBNAME := $(shell rustc --crate-file-name irc.rs)
 all: $(LIBNAME)
 
 $(LIBNAME): $(RUST_LUA)
-	rustc --dep-info irc.d irc.rs
+	rustc --dep-info lib.d lib.rs
 
-include irc.d
+include lib.d
 
 define REBUILD_DIR
 .PHONY: $(1)

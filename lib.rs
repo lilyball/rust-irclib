@@ -4,5 +4,6 @@
 //! Library for communicating with IRC servers
 
 #[allow(dead_code)];
+#[feature(macro_rules)]; // for tests
 
 mod conn;

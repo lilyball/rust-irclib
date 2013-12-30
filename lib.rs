@@ -3,6 +3,6 @@
 
 //! Library for communicating with IRC servers
 
-extern mod green;
+#[allow(dead_code)];
 
 mod conn;

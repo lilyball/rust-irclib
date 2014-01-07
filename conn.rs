@@ -31,7 +31,8 @@ pub struct Options<'a> {
     host: OptionsHost<'a>,
     port: u16,
     nick: &'a str,
-    user: &'a str
+    user: &'a str,
+    real: &'a str
 }
 
 impl<'a> Options<'a> {
@@ -42,7 +43,8 @@ impl<'a> Options<'a> {
             host: Host(host),
             port: port,
             nick: "ircnick",
-            user: "rustirclib"
+            user: "ircuser",
+            real: "rust-irclib user"
         }
     }
 }
@@ -106,6 +108,10 @@ pub fn connect(opts: Options, cb: |&mut Conn, Event|) -> Result<(),&'static str>
     };
 
     cb(&mut conn, Connected);
+
+    conn.send_command(IRCCmd(~"NICK"), [opts.nick.as_bytes()], false);
+    conn.send_command(IRCCmd(~"USER"), [opts.user.as_bytes(), bytes!("8 *"), opts.real.as_bytes()],
+                      true);
 
     conn.run(|c,e| cb(c,e));
 

@@ -6,14 +6,14 @@ LIBNAME := $(shell rustc --crate-file-name lib.rs)
 all: $(LIBNAME)
 
 $(LIBNAME):
-	rustc --dep-info lib.d lib.rs
+	rustc --dep-info lib.d -O lib.rs
 
 include lib.d
 
 example: example/ircbot
 
 example/ircbot: example/example.rs $(LIBNAME)
-	rustc -L . $<
+	rustc -L . -O $<
 
 clean:
 	-rm -f example/ircbot

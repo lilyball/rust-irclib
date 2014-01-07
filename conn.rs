@@ -162,7 +162,13 @@ impl<'a> Conn<'a> {
     ///
     /// If the command is an IRCAction, IRCCTCP, or IRCCTCPReply, the args vector is interpreted
     /// as the message that is being sent. It should be not be prefixed with a ':'.
-    pub fn send_command(&mut self, cmd: Command, args: &[u8]) {
+    ///
+    /// No attempt is made to ensure that the args vector is valid. All values in the vector are
+    /// separated with a single space, and no special handling of ':' is performed. It is assumed
+    /// that the caller will provide valid arguments and will ':'-prefix as necessary.
+    ///
+    /// The add_colon flag causes the final argument in the args list to have a ':' prepended.
+    pub fn send_command<V: Vector<u8>>(&mut self, cmd: Command, args: &[V], add_colon: bool) {
         let mut line = [0u8, ..512];
         let len = {
             let mut buf = line.mut_slice_to(510);
@@ -204,8 +210,16 @@ impl<'a> Conn<'a> {
                 }
             }
             if !args.is_empty() {
-                append(&mut buf, bytes!(" "));
-                append(&mut buf, args);
+                for arg in args.init().iter() {
+                    append(&mut buf, bytes!(" "));
+                    append(&mut buf, arg.as_slice());
+                }
+                if add_colon {
+                    append(&mut buf, bytes!(" :"));
+                } else {
+                    append(&mut buf, bytes!(" "));
+                }
+                append(&mut buf, args.last().as_slice());
             }
             if is_ctcp {
                 append(&mut buf, bytes!("\x01"));
@@ -219,7 +233,7 @@ impl<'a> Conn<'a> {
     /// Sets the user's nickname.
     pub fn set_nick<V: CopyableVector<u8>>(&mut self, nick: V) {
         let nick = nick.into_owned();
-        self.send_command(IRCCmd(~"NICK"), nick);
+        self.send_command(IRCCmd(~"NICK"), [nick.as_slice()], false);
         // if we're logged in, watch for the NICK reply before changing our nick
         if !self.logged_in {
             self.user = self.user.with_nick(nick);
@@ -228,7 +242,14 @@ impl<'a> Conn<'a> {
 
     /// Quits the connection
     pub fn quit(&mut self) {
-        self.send_command(IRCCmd(~"QUIT"), []);
+        let args: &[&[u8]] = [];
+        self.send_command(IRCCmd(~"QUIT"), args, false);
+    }
+
+    /// Sends a PRIVMSG
+    pub fn privmsg(&mut self, dst: &[u8], msg: &[u8]) {
+        // NB: .as_slice() calls are necessary to work around mozilla/rust#8874
+        self.send_command(IRCCmd(~"PRIVMSG"), [dst.as_slice(), msg.as_slice()], true)
     }
 }
 

@@ -89,7 +89,7 @@ mod normal {
     use conn::{IRCCmd, Conn, Line};
 
     pub fn PING(conn: &mut Conn, line: &Line) {
-        conn.send_command(IRCCmd(~"PONG"), line.args.connect_vec(&(' ' as u8)));
+        conn.send_command(IRCCmd(~"PONG"), line.args, false);
     }
 
     pub fn NICK(conn: &mut Conn, line: &Line) {

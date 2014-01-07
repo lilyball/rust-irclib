@@ -14,7 +14,7 @@
 
 extern mod irc;
 
-use irc::conn::{Conn, Line, Event, IRCCmd, IRCAction};
+use irc::conn::{Conn, Line, Event, IRCCmd, IRCCode, IRCAction};
 
 use std::{rand, str};
 use std::rand::Rng;
@@ -36,6 +36,25 @@ fn handler(conn: &mut Conn, event: Event) {
         irc::conn::Disconnected => println("Disconnected"),
         irc::conn::LineReceived(line) => {
             match line {
+                Line{command: IRCCode(1), ..} => {
+                    println("Logged in");
+                    // we've logged in
+                    conn.join(bytes!("##rustirclib"))
+                }
+                Line{command: IRCCmd(~"JOIN"), args, prefix: Some(prefix) } => {
+                    if prefix.nick() != conn.me().nick() {
+                        return;
+                    }
+                    if args.is_empty() {
+                        let line = Line{command: IRCCmd(~"JOIN"), args: args, prefix: Some(prefix)};
+                        println!("ERROR: Invalid JOIN message received: {}", line_desc(&line));
+                        return;
+                    }
+                    let chan = args[0];
+                    conn.privmsg(chan, bytes!("Hello"));
+                    let chan = str::from_utf8_opt(chan).unwrap_or("(invalid utf8)");
+                    println!("JOINED: {}", chan);
+                }
                 Line{command: IRCCmd(cmd@~"PRIVMSG"), args, prefix } |
                 Line{command: IRCCmd(cmd@~"NOTICE"), args, prefix } => {
                     let (src, dst, msg) = match (args, prefix.is_some()) {

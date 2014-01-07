@@ -251,6 +251,11 @@ impl<'a> Conn<'a> {
         // NB: .as_slice() calls are necessary to work around mozilla/rust#8874
         self.send_command(IRCCmd(~"PRIVMSG"), [dst.as_slice(), msg.as_slice()], true)
     }
+
+    /// Sends a JOIN
+    pub fn join(&mut self, room: &[u8]) {
+        self.send_command(IRCCmd(~"JOIN"), [room], false);
+    }
 }
 
 fn chomp(s: &mut ~[u8]) {

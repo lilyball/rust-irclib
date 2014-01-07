@@ -1,2 +1,3 @@
 *.rlib
 /test-irc
+/example/ircbot

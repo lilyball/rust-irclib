@@ -1,6 +1,6 @@
 LIBNAME := $(shell rustc --crate-file-name lib.rs)
 
-.PHONY: all clean test
+.PHONY: all clean test example
 .DEFAULT: all
 
 all: $(LIBNAME)
@@ -10,7 +10,13 @@ $(LIBNAME):
 
 include lib.d
 
+example: example/ircbot
+
+example/ircbot: example/example.rs $(LIBNAME)
+	rustc -L . $<
+
 clean:
+	-rm -f example/ircbot
 	-rm -f $(LIBNAME) test-irc
 
 test: test-irc

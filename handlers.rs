@@ -28,7 +28,7 @@ mod handshake {
     pub fn RPL_WELCOME(conn: &mut Conn, line: &Line) {
         conn.logged_in = true;
         if !line.args.is_empty() {
-            conn.nick = line.args[0].clone();
+            conn.user = conn.user.with_nick(line.args[0]);
         }
     }
 
@@ -57,7 +57,7 @@ mod handshake {
         if !line.args.is_empty() {
             nick = line.args[0].clone();
         } else {
-            nick = conn.nick.clone();
+            nick = conn.user.nick().to_owned();
         }
 
         let mut modified = false;

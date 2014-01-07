@@ -8,6 +8,7 @@ use std::io::buffered::BufferedStream;
 use std::{char,str,vec,uint};
 use std::vec::MutableCloneableVector;
 use std::cmp::min;
+use User;
 
 mod handlers;
 
@@ -16,8 +17,7 @@ pub struct Conn<'a> {
     priv host: OptionsHost<'a>,
     priv tcp: BufferedStream<TcpStream>,
     priv logged_in: bool,
-    priv nick: ~[u8],
-    priv user: &'a str
+    priv user: User
 }
 
 /// OptionsHost allows for using an IP address or a host string
@@ -102,8 +102,7 @@ pub fn connect(opts: Options, cb: |&mut Conn, Event|) -> Result<(),&'static str>
         host: opts.host,
         tcp: BufferedStream::new(stream),
         logged_in: false,
-        nick: opts.nick.as_bytes().to_owned(),
-        user: opts.user
+        user: User::new(opts.nick.as_bytes(), Some(opts.user.as_bytes()), None)
     };
 
     cb(&mut conn, Connected);
@@ -149,10 +148,9 @@ impl<'a> Conn<'a> {
         self.host
     }
 
-    /// Returns the user's nickname.
-    /// If the user hasn't logged in yet, it returns the nickname that will be used.
-    pub fn nick<'a>(&'a self) -> &'a [u8] {
-        self.nick.as_slice()
+    /// Returns the current User.
+    pub fn user<'a>(&'a self) -> &'a User {
+        &self.user
     }
 
     /// Sends a command to the server.
@@ -222,7 +220,7 @@ impl<'a> Conn<'a> {
     pub fn set_nick<V: CopyableVector<u8>>(&mut self, nick: V) {
         let nick = nick.into_owned();
         self.send_command(IRCCmd(~"NICK"), nick);
-        self.nick = nick;
+        self.user = self.user.with_nick(nick);
     }
 
     /// Quits the connection
@@ -270,7 +268,7 @@ impl Command {
 #[deriving(Eq,Clone)]
 pub struct Line {
     /// The optional prefix
-    prefix: Option<~[u8]>,
+    prefix: Option<User>,
     /// The command
     command: Command,
     /// Any arguments
@@ -286,7 +284,7 @@ impl Line {
                 None => return None,
                 Some(idx) => idx
             };
-            prefix = Some(v.slice(1, idx).to_owned());
+            prefix = Some(User::parse(v.slice(1, idx).to_owned()));
             v = v.slice_from(idx+1);
         }
         let (mut command, checkCTCP) = {
@@ -369,7 +367,7 @@ impl Line {
 
     /// Converts into the "raw" representation :prefix cmd args
     pub fn to_raw(&self) -> ~[u8] {
-        let mut cap = self.prefix.as_ref().map_default(0, |s| 1+s.len()+1);
+        let mut cap = self.prefix.as_ref().map_default(0, |s| 1+s.raw().len()+1);
         let mut found_space = false;
         cap += match self.command {
             IRCCmd(ref cmd) => cmd.len(),
@@ -406,7 +404,7 @@ impl Line {
         let mut res = vec::with_capacity(cap);
         if self.prefix.is_some() {
             res.push(':' as u8);
-            res.push_all(*self.prefix.as_ref().unwrap());
+            res.push_all(self.prefix.as_ref().unwrap().raw());
             res.push(' ' as u8);
         }
         match self.command {
@@ -463,6 +461,7 @@ impl Line {
 #[cfg(test)]
 mod tests {
     use super::{Line,IRCCmd,IRCCode,IRCAction,IRCCTCP,IRCCTCPReply};
+    use User;
 
     #[test]
     fn parse_line() {
@@ -492,7 +491,7 @@ mod tests {
         t!(b!(":sendak.freenode.net 001 asldfkj :Welcome to the freenode Internet \
             Relay Chat Network asldfkj"),
             Some(Line{
-                prefix: Some(b!("sendak.freenode.net")),
+                prefix: Some(User::parse(b!("sendak.freenode.net"))),
                 command: IRCCode(1),
                 args: ~[b!("asldfkj"),
                         b!("Welcome to the freenode Internet Relay Chat Network asldfkj")]
@@ -505,7 +504,7 @@ mod tests {
             }));
         t!(b!(":nick!user@host.com PRIVMSG #channel :Some message"),
             Some(Line{
-                prefix: Some(b!("nick!user@host.com")),
+                prefix: Some(User::parse(b!("nick!user@host.com"))),
                 command: IRCCmd(~"PRIVMSG"),
                 args: ~[b!("#channel"), b!("Some message")]
             }));
@@ -519,20 +518,20 @@ mod tests {
             }));
         t!(b!(":bob!user@host.com PRIVMSG #channel :\x01ACTION does some stuff"),
             Some(Line{
-                prefix: Some(b!("bob!user@host.com")),
+                prefix: Some(User::parse(b!("bob!user@host.com"))),
                 command: IRCAction(b!("#channel")),
                 args: ~[b!("does some stuff")]
             }),
             b!(":bob!user@host.com PRIVMSG #channel :\x01ACTION does some stuff\x01"));
         t!(b!(":bob!user@host.com PRIVMSG #channel :\x01VERSION\x01"),
             Some(Line{
-                prefix: Some(b!("bob!user@host.com")),
+                prefix: Some(User::parse(b!("bob!user@host.com"))),
                 command: IRCCTCP(b!("VERSION"), b!("#channel")),
                 args: ~[]
             }));
         t!(b!(":bob NOTICE #frobnitz :\x01RESPONSE to whatever\x01"),
             Some(Line{
-                prefix: Some(b!("bob")),
+                prefix: Some(User::parse(b!("bob"))),
                 command: IRCCTCPReply(b!("RESPONSE"), b!("#frobnitz")),
                 args: ~[b!("to whatever")]
             }));

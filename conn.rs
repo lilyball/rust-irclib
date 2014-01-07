@@ -127,15 +127,24 @@ impl<'a> Conn<'a> {
                     if cfg!(debug) {
                         let lines = str::from_utf8_opt(line);
                         if lines.is_some() {
-                            debug!("Found non-parseable line: {}", lines.unwrap());
+                            debug!("[DEBUG] Found non-parseable line: {}", lines.unwrap());
                         } else {
-                            debug!("Found non-parseable line: {:?}", line);
+                            debug!("[DEBUG] Found non-parseable line: {:?}", line);
                         }
                     }
                     continue;
                 }
                 Some(line) => line
             };
+            if cfg!(debug) {
+                let line = line.to_raw();
+                let lines = str::from_utf8_opt(line);
+                if lines.is_some() {
+                    debug!("[DEBUG] Received line: {}", lines.unwrap());
+                } else {
+                    debug!("[DEBUG] Received line: {:?}", line);
+                }
+            }
             handlers::handle_line(self, &line);
             if self.logged_in {
                 cb(self, LineReceived(line));
@@ -226,8 +235,17 @@ impl<'a> Conn<'a> {
             }
             510 - buf.len()
         };
+        if cfg!(debug) {
+            let lines = str::from_utf8_opt(line.slice_to(len));
+            if lines.is_some() {
+                debug!("[DEBUG] Sent line: {}", lines.unwrap());
+            } else {
+                debug!("[DEBUG] Sent line: {:?}", line);
+            }
+        }
         line.mut_slice_from(len).copy_from(bytes!("\r\n"));
         self.tcp.write(line.slice_to(len+2));
+        self.tcp.flush();
     }
 
     /// Sets the user's nickname.

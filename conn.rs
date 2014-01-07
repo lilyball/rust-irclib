@@ -116,7 +116,7 @@ pub fn connect(opts: Options, cb: |&mut Conn, Event|) -> Result<(),&'static str>
 
 impl<'a> Conn<'a> {
     fn run(&mut self, cb: |&mut Conn, Event|) {
-        while !self.tcp.eof() {
+        loop {
             let mut line = match self.tcp.read_until('\n' as u8) {
                 None => break,
                 Some(line) => line

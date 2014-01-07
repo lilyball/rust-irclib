@@ -42,7 +42,7 @@ impl<'a> Options<'a> {
             host: Host(host),
             port: port,
             nick: "ircnick",
-            user: "ircuser"
+            user: "rustirclib"
         }
     }
 }

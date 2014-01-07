@@ -6,4 +6,4 @@
 #[allow(dead_code)];
 #[feature(macro_rules)]; // for tests
 
-mod conn;
+pub mod conn;

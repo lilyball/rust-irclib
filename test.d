@@ -1,2 +1,2 @@
-test-irc: lib.rs conn.rs
+test-irc: lib.rs conn.rs handlers.rs
 

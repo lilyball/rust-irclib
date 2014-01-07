@@ -4,13 +4,20 @@ use io_error = std::io::io_error::cond;
 use std::io::{TcpStream,IpAddr};
 use std::io::net::addrinfo;
 use std::io::net::ip::SocketAddr;
+use std::io::buffered::BufferedStream;
 use std::{char,str,vec,uint};
+use std::vec::MutableCloneableVector;
 use std::cmp::min;
+
+mod handlers;
 
 /// Conn represenets a connection to a single IRC server
 pub struct Conn<'a> {
-    host: OptionsHost<'a>,
-    priv tcp: TcpStream
+    priv host: OptionsHost<'a>,
+    priv tcp: BufferedStream<TcpStream>,
+    priv logged_in: bool,
+    priv nick: ~[u8],
+    priv user: &'a str
 }
 
 /// OptionsHost allows for using an IP address or a host string
@@ -22,7 +29,9 @@ pub enum OptionsHost<'a> {
 /// Options used with Conn for connecting to the server.
 pub struct Options<'a> {
     host: OptionsHost<'a>,
-    port: u16
+    port: u16,
+    nick: &'a str,
+    user: &'a str
 }
 
 impl<'a> Options<'a> {
@@ -31,9 +40,23 @@ impl<'a> Options<'a> {
         #[inline];
         Options {
             host: Host(host),
-            port: port
+            port: port,
+            nick: "ircnick",
+            user: "ircuser"
         }
     }
+}
+
+/// Events that can be handled in the callback
+pub enum Event {
+    /// The connection was established
+    Connected,
+    /// A line was received from the server.
+    /// This event is not sent until the user has successfully logged in.
+    /// The first received line should be 001
+    LineReceived(Line),
+    /// The connection has terminated
+    Disconnected
 }
 
 pub static DefaultPort: u16 = 6667;
@@ -47,7 +70,7 @@ pub static DefaultPort: u16 = 6667;
 ///
 /// Raises the `io_error` condition if an IO error happens at any point after the connection
 /// is established.
-pub fn connect(opts: Options) -> Result<(),&'static str> {
+pub fn connect(opts: Options, cb: |&mut Conn, Event|) -> Result<(),&'static str> {
     let addr = {
         match opts.host {
             Addr(x) => x,
@@ -77,17 +100,144 @@ pub fn connect(opts: Options) -> Result<(),&'static str> {
 
     let mut conn = Conn{
         host: opts.host,
-        tcp: stream
+        tcp: BufferedStream::new(stream),
+        logged_in: false,
+        nick: opts.nick.as_bytes().to_owned(),
+        user: opts.user
     };
 
-    conn.run();
+    cb(&mut conn, Connected);
+
+    conn.run(|c,e| cb(c,e));
+
+    cb(&mut conn, Disconnected);
 
     Ok(())
 }
 
 impl<'a> Conn<'a> {
-    fn run(&mut self) {
-        
+    fn run(&mut self, cb: |&mut Conn, Event|) {
+        while !self.tcp.eof() {
+            let mut line = match self.tcp.read_until('\n' as u8) {
+                None => break,
+                Some(line) => line
+            };
+            chomp(&mut line);
+            let line = match Line::parse(line) {
+                None => {
+                    if cfg!(debug) {
+                        let lines = str::from_utf8_opt(line);
+                        if lines.is_some() {
+                            debug!("Found non-parseable line: {}", lines.unwrap());
+                        } else {
+                            debug!("Found non-parseable line: {:?}", line);
+                        }
+                    }
+                    continue;
+                }
+                Some(line) => line
+            };
+            handlers::handle_line(self, &line);
+            if self.logged_in {
+                cb(self, LineReceived(line));
+            }
+        }
+    }
+
+    /// Returns the host that was used to create this Conn
+    pub fn host(&self) -> OptionsHost<'a> {
+        self.host
+    }
+
+    /// Returns the user's nickname.
+    /// If the user hasn't logged in yet, it returns the nickname that will be used.
+    pub fn nick<'a>(&'a self) -> &'a [u8] {
+        self.nick.as_slice()
+    }
+
+    /// Sends a command to the server.
+    /// The line is truncated to 510 bytes (not including newline) before sending.
+    ///
+    /// If the command is an IRCCmd or IRCCode, the args vector is interpreted as a
+    /// space-separated list of arguments, with a ':' argument prefix denoting the final
+    /// (possibly space-containing) argument.
+    ///
+    /// If the command is an IRCAction, IRCCTCP, or IRCCTCPReply, the args vector is interpreted
+    /// as the message that is being sent. It should be not be prefixed with a ':'.
+    pub fn send_command(&mut self, cmd: Command, args: &[u8]) {
+        let mut line = [0u8, ..512];
+        let len = {
+            let mut buf = line.mut_slice_to(510);
+
+            fn append(buf: &mut &mut [u8], v: &[u8]) {
+                let len = buf.copy_from(v);
+                // this should work:
+                //   *buf = buf.mut_slice_from(len);
+                // but I'm getting weird borrowck issues (see mozilla/rust#11361)
+                *buf = unsafe { ::std::cast::transmute(buf.mut_slice_from(len)) };
+            }
+
+            let is_ctcp = cmd.is_ctcp();
+            match cmd {
+                IRCCmd(cmd) => {
+                    append(&mut buf, cmd.as_bytes());
+                }
+                IRCCode(code) => {
+                    uint::to_str_bytes(code, 10, |v| {
+                        append(&mut buf, v);
+                    });
+                }
+                IRCAction(ref dst) | IRCCTCP(ref dst,_) => {
+                    append(&mut buf, bytes!("PRIVMSG "));
+                    append(&mut buf, *dst);
+                    append(&mut buf, bytes!(" :\x01"));
+                    let action = match cmd {
+                        IRCAction(_) => bytes!("ACTION"),
+                        IRCCTCP(_,ref action) => action.as_slice(),
+                        _ => unreachable!()
+                    };
+                    append(&mut buf, action);
+                }
+                IRCCTCPReply(dst, action) => {
+                    append(&mut buf, bytes!("NOTICE "));
+                    append(&mut buf, dst);
+                    append(&mut buf, bytes!(" :\x01"));
+                    append(&mut buf, action);
+                }
+            }
+            if !args.is_empty() {
+                append(&mut buf, bytes!(" "));
+                append(&mut buf, args);
+            }
+            if is_ctcp {
+                append(&mut buf, bytes!("\x01"));
+            }
+            510 - buf.len()
+        };
+        line.mut_slice_from(len).copy_from(bytes!("\r\n"));
+        self.tcp.write(line.slice_to(len+2));
+    }
+
+    /// Sets the user's nickname.
+    pub fn set_nick<V: CopyableVector<u8>>(&mut self, nick: V) {
+        let nick = nick.into_owned();
+        self.send_command(IRCCmd(~"NICK"), nick);
+        self.nick = nick;
+    }
+
+    /// Quits the connection
+    pub fn quit(&mut self) {
+        self.send_command(IRCCmd(~"QUIT"), []);
+    }
+}
+
+fn chomp(s: &mut ~[u8]) {
+    if s.ends_with(bytes!("\r\n")) {
+        let len = s.len() - 2;
+        s.truncate(len);
+    } else if s.ends_with(bytes!("\n")) {
+        let len = s.len() - 1;
+        s.truncate(len);
     }
 }
 

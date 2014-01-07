@@ -16,6 +16,7 @@ pub fn handle_line(conn: &mut Conn, line: &Line) {
     } else {
         match line.command {
             IRCCmd(~"PING") => normal::PING(conn, line),
+            IRCCmd(~"NICK") => normal::NICK(conn, line),
             _ => ()
         }
     }
@@ -81,5 +82,20 @@ mod normal {
 
     pub fn PING(conn: &mut Conn, line: &Line) {
         conn.send_command(IRCCmd(~"PONG"), line.args.connect_vec(&(' ' as u8)));
+    }
+
+    pub fn NICK(conn: &mut Conn, line: &Line) {
+        if line.args.is_empty() {
+            // where's my arg?
+            return;
+        }
+        match line.prefix {
+            Some(ref user) => {
+                if user.nick() == conn.user.nick() {
+                    conn.user = conn.user.with_nick(line.args[0]);
+                }
+            }
+            None => ()
+        }
     }
 }

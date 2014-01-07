@@ -149,7 +149,7 @@ impl<'a> Conn<'a> {
     }
 
     /// Returns the current User.
-    pub fn user<'a>(&'a self) -> &'a User {
+    pub fn me<'a>(&'a self) -> &'a User {
         &self.user
     }
 
@@ -220,7 +220,10 @@ impl<'a> Conn<'a> {
     pub fn set_nick<V: CopyableVector<u8>>(&mut self, nick: V) {
         let nick = nick.into_owned();
         self.send_command(IRCCmd(~"NICK"), nick);
-        self.user = self.user.with_nick(nick);
+        // if we're logged in, watch for the NICK reply before changing our nick
+        if !self.logged_in {
+            self.user = self.user.with_nick(nick);
+        }
     }
 
     /// Quits the connection

@@ -35,6 +35,14 @@ mod handshake {
 
     // 433
     pub fn ERR_NICKNAMEINUSE(conn: &mut Conn, line: &Line) {
+        if !line.args.is_empty() {
+            let nick = line.args[0].as_slice();
+            if nick == conn.user.nick() {
+                conn.set_nick(nick + bytes!("_"));
+                return;
+            }
+        }
+        // nick was truncated? Fall back to generic _-replacement behavior
         bad_nick(conn, line);
     }
 

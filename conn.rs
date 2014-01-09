@@ -420,7 +420,7 @@ impl Line {
 
     /// Converts into the "raw" representation :prefix cmd args
     pub fn to_raw(&self) -> ~[u8] {
-        let mut cap = self.prefix.as_ref().map_default(0, |s| 1+s.raw().len()+1);
+        let mut cap = self.prefix.as_ref().map_or(0, |s| 1+s.raw().len()+1);
         let mut found_space = false;
         cap += match self.command {
             IRCCmd(ref cmd) => cmd.len(),

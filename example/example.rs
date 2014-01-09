@@ -62,8 +62,9 @@ fn handler(conn: &mut Conn, event: Event) {
                             (prefix.as_ref().unwrap().nick(), dst, msg)
                         }
                         (args, _) => {
+                            print!("ERROR: Unexpected {} line: ", cmd);
                             let line = Line{command: IRCCmd(cmd), args: args, prefix: prefix};
-                            println!("ERROR: Unexpected PRIVMSG line: {}", line_desc(&line));
+                            println!("{}", line_desc(&line));
                             return;
                         }
                     };

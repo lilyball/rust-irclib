@@ -25,19 +25,19 @@ fn main() {
     let nick = format!("rustirclib{}", rand::task_rng().gen_range(100u, 1000u));
     opts.nick = nick.as_slice();
     match irc::conn::connect(opts, handler) {
-        Ok(()) => println("Exiting..."),
+        Ok(()) => println!("Exiting..."),
         Err(err) => println!("Connection error: {}", err)
     }
 }
 
 fn handler(conn: &mut Conn, event: Event) {
     match event {
-        irc::conn::Connected => println("Connected"),
-        irc::conn::Disconnected => println("Disconnected"),
+        irc::conn::Connected => println!("Connected"),
+        irc::conn::Disconnected => println!("Disconnected"),
         irc::conn::LineReceived(line) => {
             match line {
                 Line{command: IRCCode(1), ..} => {
-                    println("Logged in");
+                    println!("Logged in");
                     // we've logged in
                     conn.join(bytes!("##rustirclib"))
                 }
@@ -130,7 +130,7 @@ fn handle_privmsg(conn: &mut Conn, msg: &[u8], src: &[u8], dst: &[u8]) {
             println!("--> PRIVMSG({}) {}: {}", reply, src, msg);
         }
         CommandMessage(cmd) if cmd == bytes!("quit") => {
-            println("Quitting...");
+            println!("Quitting...");
             conn.quit();
         }
         _ => ()

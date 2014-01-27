@@ -52,7 +52,7 @@ fn handler(conn: &mut Conn, event: Event) {
                     }
                     let chan = args[0];
                     conn.privmsg(chan, bytes!("Hello"));
-                    let chan = str::from_utf8_opt(chan).unwrap_or("(invalid utf8)");
+                    let chan = str::from_utf8(chan).unwrap_or("(invalid utf8)");
                     println!("JOINED: {}", chan);
                 }
                 Line{command: IRCCmd(cmd@~"PRIVMSG"), args, prefix } |
@@ -68,9 +68,9 @@ fn handler(conn: &mut Conn, event: Event) {
                             return;
                         }
                     };
-                    let dsts = str::from_utf8_opt(dst).unwrap_or("(invalid utf8)");
-                    let srcs = str::from_utf8_opt(src).unwrap_or("(invalid utf8)");
-                    let msgs = str::from_utf8_opt(msg).unwrap_or("(invalid utf8)");
+                    let dsts = str::from_utf8(dst).unwrap_or("(invalid utf8)");
+                    let srcs = str::from_utf8(src).unwrap_or("(invalid utf8)");
+                    let msgs = str::from_utf8(msg).unwrap_or("(invalid utf8)");
                     println!("<-- {}({}) {}: {}", cmd, dsts, srcs, msgs);
                     handle_privmsg(conn, msg, src, dst)
                 }
@@ -85,9 +85,9 @@ fn handler(conn: &mut Conn, event: Event) {
                             return;
                         }
                     };
-                    let dst = str::from_utf8_opt(dst).unwrap_or("(invalid utf8)");
-                    let src = str::from_utf8_opt(src).unwrap_or("(invalid utf8)");
-                    let msg = str::from_utf8_opt(msg).unwrap_or("(invalid utf8)");
+                    let dst = str::from_utf8(dst).unwrap_or("(invalid utf8)");
+                    let src = str::from_utf8(src).unwrap_or("(invalid utf8)");
+                    let msg = str::from_utf8(msg).unwrap_or("(invalid utf8)");
                     println!("<-- PRIVMSG({}) {} {}", dst, src, msg);
                 }
                 _ => ()
@@ -124,9 +124,9 @@ fn handle_privmsg(conn: &mut Conn, msg: &[u8], src: &[u8], dst: &[u8]) {
             let reply = if dst == conn.me().nick() { src } else { dst };
             let msg = src + bytes!(": Hello");
             conn.privmsg(reply, msg);
-            let src = str::from_utf8_opt(conn.me().nick()).unwrap_or("(invalid utf8)");
-            let reply = str::from_utf8_opt(reply).unwrap_or("(invalid utf8)");
-            let msg = str::from_utf8_opt(msg).unwrap_or("(invalid utf8)");
+            let src = str::from_utf8(conn.me().nick()).unwrap_or("(invalid utf8)");
+            let reply = str::from_utf8(reply).unwrap_or("(invalid utf8)");
+            let msg = str::from_utf8(msg).unwrap_or("(invalid utf8)");
             println!("--> PRIVMSG({}) {}: {}", reply, src, msg);
         }
         CommandMessage(cmd) if cmd == bytes!("quit") => {
@@ -139,6 +139,6 @@ fn handle_privmsg(conn: &mut Conn, msg: &[u8], src: &[u8], dst: &[u8]) {
 
 fn line_desc(line: &Line) -> ~str {
     let raw = line.to_raw();
-    let raws = str::from_utf8_opt(raw);
+    let raws = str::from_utf8(raw);
     raws.map(|s| s.to_owned()).unwrap_or_else(|| format!("{:?}", raw))
 }

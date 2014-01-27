@@ -4,7 +4,7 @@ use io_error = std::io::io_error::cond;
 use std::io::{TcpStream,IpAddr};
 use std::io::net::addrinfo;
 use std::io::net::ip::SocketAddr;
-use std::io::buffered::BufferedStream;
+use std::io::BufferedStream;
 use std::{char,str,vec,uint};
 use std::vec::MutableCloneableVector;
 use std::cmp::min;
@@ -131,7 +131,7 @@ impl<'a> Conn<'a> {
             let line = match Line::parse(line) {
                 None => {
                     if cfg!(debug) {
-                        let lines = str::from_utf8_opt(line);
+                        let lines = str::from_utf8(line);
                         if lines.is_some() {
                             debug!("[DEBUG] Found non-parseable line: {}", lines.unwrap());
                         } else {
@@ -144,7 +144,7 @@ impl<'a> Conn<'a> {
             };
             if cfg!(debug) {
                 let line = line.to_raw();
-                let lines = str::from_utf8_opt(line);
+                let lines = str::from_utf8(line);
                 if lines.is_some() {
                     debug!("[DEBUG] Received line: {}", lines.unwrap());
                 } else {
@@ -211,7 +211,7 @@ impl<'a> Conn<'a> {
                     append(&mut buf, *dst);
                     append(&mut buf, bytes!(" :\x01"));
                     let action = match cmd {
-                        IRCAction(_) => bytes!("ACTION"),
+                        IRCAction(_) => { static b: &'static [u8] = bytes!("ACTION"); b }
                         IRCCTCP(_,ref action) => action.as_slice(),
                         _ => unreachable!()
                     };
@@ -234,7 +234,7 @@ impl<'a> Conn<'a> {
                 } else {
                     append(&mut buf, bytes!(" "));
                 }
-                append(&mut buf, args.last().as_slice());
+                append(&mut buf, args.last().unwrap().as_slice());
             }
             if is_ctcp {
                 append(&mut buf, bytes!("\x01"));
@@ -242,7 +242,7 @@ impl<'a> Conn<'a> {
             510 - buf.len()
         };
         if cfg!(debug) {
-            let lines = str::from_utf8_opt(line.slice_to(len));
+            let lines = str::from_utf8(line.slice_to(len));
             if lines.is_some() {
                 debug!("[DEBUG] Sent line: {}", lines.unwrap());
             } else {
@@ -357,7 +357,7 @@ impl Line {
                 (IRCCode(uint::parse_bytes(cmd, 10).unwrap()), false)
             } else if cmd.iter().all(|&b| b < 0x80 && char::is_alphabetic(b as char)) {
                 let shouldCheck = cmd == bytes!("PRIVMSG") || cmd == bytes!("NOTICE");
-                (IRCCmd(str::from_utf8(cmd).to_owned()), shouldCheck)
+                (IRCCmd(str::from_utf8(cmd).unwrap().to_owned()), shouldCheck)
             } else {
                 return None;
             }
@@ -378,8 +378,8 @@ impl Line {
             args.push(v.slice_to(idx).to_owned());
             v = v.slice_from(idx+1);
         }
-        if checkCTCP && args.len() > 1 && args.last().starts_with([0x1]) {
-            let mut text = args.pop();
+        if checkCTCP && args.last().map_or(false, |v| v.starts_with([0x1])) {
+            let mut text = args.pop().unwrap();
             if text.len() > 1 && text.ends_with([0x1]) {
                 text = text.slice(1,text.len()-1).to_owned();
             } else {
@@ -446,7 +446,7 @@ impl Line {
                     cap += 1 + arg.len();
                 }
             }
-            let last = self.args.last();
+            let last = self.args.last().unwrap();
             found_space = last.contains(&(' ' as u8));
             if found_space {
                 cap += 1 + 1 /* : */ + last.len();
@@ -505,7 +505,7 @@ impl Line {
             if found_space {
                 res.push(':' as u8);
             }
-            res.push_all(*self.args.last());
+            res.push_all(*self.args.last().unwrap());
         }
         res
     }

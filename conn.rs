@@ -1,7 +1,6 @@
 //! Management of IRC server connection
 
-use io_error = std::io::io_error::cond;
-use std::io::{TcpStream,IpAddr};
+use std::io::{IoError, IoResult, TcpStream,IpAddr};
 use std::io::net::addrinfo;
 use std::io::net::ip::SocketAddr;
 use std::io::BufferedStream;
@@ -61,43 +60,40 @@ pub enum Event {
     Disconnected
 }
 
+/// Errors that can be returned from connect()
+pub enum Error {
+    /// Error resolving host address
+    ErrResolve(IoError),
+    /// Error connecting to server
+    ErrConnect(IoError),
+    /// I/O error raised while connection is active
+    ErrIO(IoError)
+}
+
 pub static DefaultPort: u16 = 6667;
 
 /// Connects to the remote server. This method will not return until the connection
 /// is terminated. Returns Ok(()) after connection termination if the connection was
-/// established successfully, or Err(&str) if the connection could not be established in the
-/// first place.
-///
-/// # Failure
-///
-/// Raises the `io_error` condition if an IO error happens at any point after the connection
-/// is established.
-pub fn connect(opts: Options, cb: |&mut Conn, Event|) -> Result<(),&'static str> {
+/// established successfully, or Err(_) if the connection could not be established in the
+/// first place, or if an error is thrown while the connection is active.
+pub fn connect(opts: Options, cb: |&mut Conn, Event|) -> Result<(),Error> {
     let addr = {
         match opts.host {
             Addr(x) => x,
             Host(host) => {
-                let _guard = io_error.trap(|err| {
-                    warn!("io_error resolving host address: {}", err.to_str());
-                }).guard();
                 match addrinfo::get_host_addresses(host) {
-                    None | Some([]) => return Err("could not resolve host address"),
-                    Some([x, ..]) => x
+                    Err(e) => return Err(ErrResolve(e)),
+                    Ok([x, ..]) => x,
+                    Ok([]) => fail!("addrinfo returned 0 addresses")
                 }
             }
         }
     };
     let addr = SocketAddr{ ip: addr, port: opts.port };
 
-    let stream = io_error.trap(|err| {
-        warn!("io_error connecting to server: {}", err.to_str());
-    }).inside(|| {
-        // I don't know if ::connect() can throw io_error, but better safe than sorry
-        TcpStream::connect(addr)
-    });
-    let stream = match stream {
-        None => return Err("could not connect to server"),
-        Some(tcp) => tcp
+    let stream = match TcpStream::connect(addr) {
+        Err(e) => return Err(ErrConnect(e)),
+        Ok(stream) => stream
     };
 
     let mut conn = Conn{
@@ -113,20 +109,20 @@ pub fn connect(opts: Options, cb: |&mut Conn, Event|) -> Result<(),&'static str>
     conn.send_command(IRCCmd(~"USER"), [opts.user.as_bytes(), bytes!("8 *"), opts.real.as_bytes()],
                       true);
 
-    conn.run(|c,e| cb(c,e));
+    let res = conn.run(|c,e| cb(c,e));
 
     cb(&mut conn, Disconnected);
 
-    Ok(())
+    match res {
+        Err(e) => Err(ErrIO(e)),
+        Ok(()) => Ok(())
+    }
 }
 
 impl<'a> Conn<'a> {
-    fn run(&mut self, cb: |&mut Conn, Event|) {
+    fn run(&mut self, cb: |&mut Conn, Event|) -> IoResult<()> {
         loop {
-            let mut line = match self.tcp.read_until('\n' as u8) {
-                None => break,
-                Some(line) => line
-            };
+            let mut line = if_ok!(self.tcp.read_until('\n' as u8));
             chomp(&mut line);
             let line = match Line::parse(line) {
                 None => {
@@ -255,7 +251,7 @@ impl<'a> Conn<'a> {
     }
 
     /// Sets the user's nickname.
-    pub fn set_nick<V: CopyableVector<u8>>(&mut self, nick: V) {
+    pub fn set_nick<V: CloneableVector<u8>>(&mut self, nick: V) {
         let nick = nick.into_owned();
         self.send_command(IRCCmd(~"NICK"), [nick.as_slice()], false);
         // if we're logged in, watch for the NICK reply before changing our nick

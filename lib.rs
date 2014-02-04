@@ -19,7 +19,7 @@ pub struct User {
 }
 
 impl User {
-    pub fn parse<V: CopyableVector<u8>>(v: V) -> User {
+    pub fn parse<V: CloneableVector<u8>>(v: V) -> User {
         let v = v.into_owned();
 
         let (mut bangloc, mut atloc) = (None, None);

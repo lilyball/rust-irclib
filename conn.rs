@@ -1,5 +1,6 @@
 //! Management of IRC server connection
 
+use std::fmt;
 use std::io::{IoError, IoResult, TcpStream,IpAddr};
 use std::io::net::addrinfo;
 use std::io::net::ip::SocketAddr;
@@ -14,9 +15,14 @@ mod handlers;
 /// Conn represenets a connection to a single IRC server
 pub struct Conn<'a> {
     priv host: OptionsHost<'a>,
-    priv tcp: BufferedStream<TcpStream>,
+    priv stream: ConnStream,
     priv logged_in: bool,
     priv user: User
+}
+
+enum ConnStream {
+    Stream(BufferedStream<TcpStream>),
+    StreamErr(IoError)
 }
 
 /// OptionsHost allows for using an IP address or a host string
@@ -70,6 +76,16 @@ pub enum Error {
     ErrIO(IoError)
 }
 
+impl fmt::Show for Error {
+    fn fmt(val: &Error, f: &mut fmt::Formatter) -> fmt::Result {
+        match *val {
+            ErrResolve(ref err) => { write!(f.buf, "resolve error: {}", *err) }
+            ErrConnect(ref err) => { write!(f.buf, "connect error: {}", *err) }
+            ErrIO(ref err) => { fmt::Show::fmt(err, f) }
+        }
+    }
+}
+
 pub static DefaultPort: u16 = 6667;
 
 /// Connects to the remote server. This method will not return until the connection
@@ -98,7 +114,7 @@ pub fn connect(opts: Options, cb: |&mut Conn, Event|) -> Result<(),Error> {
 
     let mut conn = Conn{
         host: opts.host,
-        tcp: BufferedStream::new(stream),
+        stream: Stream(BufferedStream::new(stream)),
         logged_in: false,
         user: User::new(opts.nick.as_bytes(), Some(opts.user.as_bytes()), None)
     };
@@ -122,7 +138,12 @@ pub fn connect(opts: Options, cb: |&mut Conn, Event|) -> Result<(),Error> {
 impl<'a> Conn<'a> {
     fn run(&mut self, cb: |&mut Conn, Event|) -> IoResult<()> {
         loop {
-            let mut line = if_ok!(self.tcp.read_until('\n' as u8));
+            let mut line = match self.stream {
+                Stream(ref mut stream) => {
+                    if_ok!(stream.read_until('\n' as u8))
+                },
+                StreamErr(ref err) => return Err(err.clone())
+            };
             chomp(&mut line);
             let line = match Line::parse(line) {
                 None => {
@@ -180,74 +201,85 @@ impl<'a> Conn<'a> {
     ///
     /// The add_colon flag causes the final argument in the args list to have a ':' prepended.
     pub fn send_command<V: Vector<u8>>(&mut self, cmd: Command, args: &[V], add_colon: bool) {
-        let mut line = [0u8, ..512];
-        let len = {
-            let mut buf = line.mut_slice_to(510);
+        match {
+            let stream = match self.stream {
+                Stream(ref mut stream) => stream,
+                StreamErr(_) => return
+            };
+            let mut line = [0u8, ..512];
+            let len = {
+                let mut buf = line.mut_slice_to(510);
 
-            fn append(buf: &mut &mut [u8], v: &[u8]) {
-                let len = buf.copy_from(v);
-                // this should work:
-                //   *buf = buf.mut_slice_from(len);
-                // but I'm getting weird borrowck issues (see mozilla/rust#11361)
-                *buf = unsafe { ::std::cast::transmute(buf.mut_slice_from(len)) };
-            }
+                fn append(buf: &mut &mut [u8], v: &[u8]) {
+                    let len = buf.copy_from(v);
+                    // this should work:
+                    //   *buf = buf.mut_slice_from(len);
+                    // but I'm getting weird borrowck issues (see mozilla/rust#11361)
+                    *buf = unsafe { ::std::cast::transmute(buf.mut_slice_from(len)) };
+                }
 
-            let is_ctcp = cmd.is_ctcp();
-            match cmd {
-                IRCCmd(cmd) => {
-                    append(&mut buf, cmd.as_bytes());
+                let is_ctcp = cmd.is_ctcp();
+                match cmd {
+                    IRCCmd(cmd) => {
+                        append(&mut buf, cmd.as_bytes());
+                    }
+                    IRCCode(code) => {
+                        uint::to_str_bytes(code, 10, |v| {
+                            append(&mut buf, v);
+                        });
+                    }
+                    IRCAction(ref dst) | IRCCTCP(ref dst,_) => {
+                        append(&mut buf, bytes!("PRIVMSG "));
+                        append(&mut buf, *dst);
+                        append(&mut buf, bytes!(" :\x01"));
+                        let action = match cmd {
+                            IRCAction(_) => { static b: &'static [u8] = bytes!("ACTION"); b }
+                            IRCCTCP(_,ref action) => action.as_slice(),
+                            _ => unreachable!()
+                        };
+                        append(&mut buf, action);
+                    }
+                    IRCCTCPReply(dst, action) => {
+                        append(&mut buf, bytes!("NOTICE "));
+                        append(&mut buf, dst);
+                        append(&mut buf, bytes!(" :\x01"));
+                        append(&mut buf, action);
+                    }
                 }
-                IRCCode(code) => {
-                    uint::to_str_bytes(code, 10, |v| {
-                        append(&mut buf, v);
-                    });
+                if !args.is_empty() {
+                    for arg in args.init().iter() {
+                        append(&mut buf, bytes!(" "));
+                        append(&mut buf, arg.as_slice());
+                    }
+                    if add_colon {
+                        append(&mut buf, bytes!(" :"));
+                    } else {
+                        append(&mut buf, bytes!(" "));
+                    }
+                    append(&mut buf, args.last().unwrap().as_slice());
                 }
-                IRCAction(ref dst) | IRCCTCP(ref dst,_) => {
-                    append(&mut buf, bytes!("PRIVMSG "));
-                    append(&mut buf, *dst);
-                    append(&mut buf, bytes!(" :\x01"));
-                    let action = match cmd {
-                        IRCAction(_) => { static b: &'static [u8] = bytes!("ACTION"); b }
-                        IRCCTCP(_,ref action) => action.as_slice(),
-                        _ => unreachable!()
-                    };
-                    append(&mut buf, action);
+                if is_ctcp {
+                    append(&mut buf, bytes!("\x01"));
                 }
-                IRCCTCPReply(dst, action) => {
-                    append(&mut buf, bytes!("NOTICE "));
-                    append(&mut buf, dst);
-                    append(&mut buf, bytes!(" :\x01"));
-                    append(&mut buf, action);
-                }
-            }
-            if !args.is_empty() {
-                for arg in args.init().iter() {
-                    append(&mut buf, bytes!(" "));
-                    append(&mut buf, arg.as_slice());
-                }
-                if add_colon {
-                    append(&mut buf, bytes!(" :"));
+                510 - buf.len()
+            };
+            if cfg!(debug) {
+                let lines = str::from_utf8(line.slice_to(len));
+                if lines.is_some() {
+                    debug!("[DEBUG] Sent line: {}", lines.unwrap());
                 } else {
-                    append(&mut buf, bytes!(" "));
+                    debug!("[DEBUG] Sent line: {:?}", line);
                 }
-                append(&mut buf, args.last().unwrap().as_slice());
             }
-            if is_ctcp {
-                append(&mut buf, bytes!("\x01"));
+            line.mut_slice_from(len).copy_from(bytes!("\r\n"));
+            match stream.write(line.slice_to(len+2)).and_then(|_| stream.flush()) {
+                Ok(()) => None,
+                Err(e) => Some(e)
             }
-            510 - buf.len()
-        };
-        if cfg!(debug) {
-            let lines = str::from_utf8(line.slice_to(len));
-            if lines.is_some() {
-                debug!("[DEBUG] Sent line: {}", lines.unwrap());
-            } else {
-                debug!("[DEBUG] Sent line: {:?}", line);
-            }
+        } {
+            None => (),
+            Some(e) => { self.stream = StreamErr(e); }
         }
-        line.mut_slice_from(len).copy_from(bytes!("\r\n"));
-        self.tcp.write(line.slice_to(len+2));
-        self.tcp.flush();
     }
 
     /// Sets the user's nickname.

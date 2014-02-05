@@ -1,11 +1,12 @@
 LIBNAME := $(shell rustc --crate-file-name lib.rs)
 
-.PHONY: all clean test example
-.DEFAULT: all
+.PHONY: all lib clean test example
 
 $(if $(DEBUG),$(eval CFG_DEBUG := --cfg debug))
 
-all: $(LIBNAME)
+lib: $(LIBNAME)
+
+all: lib example
 
 $(LIBNAME):
 	rustc --dep-info lib.d -O $(CFG_DEBUG) lib.rs

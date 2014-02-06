@@ -3,13 +3,14 @@
 
 //! Library for communicating with IRC servers
 
-#[allow(dead_code)];
 #[feature(macro_rules)]; // for tests
+#[warn(missing_doc)];
 
 use std::vec;
 
 pub mod conn;
 
+/// Representation of an IRC user
 #[deriving(Clone)]
 pub struct User {
     priv raw: ~[u8],
@@ -19,6 +20,10 @@ pub struct User {
 }
 
 impl User {
+    /// Parse a byte-vector into a User.
+    /// The byte-vector should represent a string of the form
+    ///
+    ///     nickname[!username][@host]
     pub fn parse<V: CloneableVector<u8>>(v: V) -> User {
         let v = v.into_owned();
 
@@ -42,6 +47,7 @@ impl User {
         }
     }
 
+    /// Construct a new User from source components
     pub fn new(nick: &[u8], user: Option<&[u8]>, host: Option<&[u8]>) -> User {
         let cap = nick.len() + user.map_or(0, |v| v.len()+1) +
                   host.map_or(0, |v| v.len()+1);
@@ -60,22 +66,28 @@ impl User {
         User::parse(raw)
     }
 
+    /// Returns the raw byte-vector that represents the User
     pub fn raw<'a>(&'a self) -> &'a [u8] {
         self.raw.as_slice()
     }
 
+    /// Returns the nickname of the User
     pub fn nick<'a>(&'a self) -> &'a [u8] {
         self.raw.slice_to(self.nicklen)
     }
 
+    /// Returns the username of the User, if any
     pub fn user<'a>(&'a self) -> Option<&'a [u8]> {
         self.user.map(|(a,b)| self.raw.slice(a, b))
     }
 
+    /// Returns the hostname of the User, if any
     pub fn host<'a>(&'a self) -> Option<&'a [u8]> {
         self.host.map(|(a,b)| self.raw.slice(a,b))
     }
 
+    /// Constructs a new User with the given nick and the username/hostname
+    /// of the receiver.
     pub fn with_nick(&self, nick: &[u8]) -> User {
         User::new(nick, self.user(), self.host())
     }

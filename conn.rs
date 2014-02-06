@@ -27,17 +27,24 @@ enum ConnStream {
 
 /// OptionsHost allows for using an IP address or a host string
 pub enum OptionsHost<'a> {
+    /// Host string
     Host(&'a str),
+    /// IP address
     Addr(IpAddr)
 }
 
 /// Options used with Conn for connecting to the server.
 pub struct Options<'a> {
+    /// The server host to connect to
     host: OptionsHost<'a>,
+    /// The server port to connect to
     port: u16,
+    /// The nickname to use
     nick: &'a str,
+    /// The username to use
     user: &'a str,
-    real: &'a str
+    /// The real name to use
+    real: &'a str,
 }
 
 impl<'a> Options<'a> {

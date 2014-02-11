@@ -84,11 +84,11 @@ pub enum Error {
 }
 
 impl fmt::Show for Error {
-    fn fmt(val: &Error, f: &mut fmt::Formatter) -> fmt::Result {
-        match *val {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
             ErrResolve(ref err) => { write!(f.buf, "resolve error: {}", *err) }
             ErrConnect(ref err) => { write!(f.buf, "connect error: {}", *err) }
-            ErrIO(ref err) => { fmt::Show::fmt(err, f) }
+            ErrIO(ref err) => err.fmt(f)
         }
     }
 }

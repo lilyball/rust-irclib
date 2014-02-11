@@ -1,13 +1,15 @@
 //! Management of IRC server connection
 
 use std::fmt;
-use std::io::{IoError, IoResult, TcpStream,IpAddr};
+use std::io;
+use std::io::{IoError, IoResult, TcpStream, IpAddr};
 use std::io::net::addrinfo;
 use std::io::net::ip::SocketAddr;
 use std::io::BufferedStream;
 use std::{char,str,vec,uint};
 use std::vec::MutableCloneableVector;
 use std::cmp::min;
+use std::{comm,task};
 use User;
 
 mod handlers;
@@ -15,14 +17,9 @@ mod handlers;
 /// Conn represenets a connection to a single IRC server
 pub struct Conn<'a> {
     priv host: OptionsHost<'a>,
-    priv stream: ConnStream,
+    priv write_chan: Option<Chan<~[u8]>>,
     priv logged_in: bool,
     priv user: User
-}
-
-enum ConnStream {
-    Stream(BufferedStream<TcpStream>),
-    StreamErr(IoError)
 }
 
 /// OptionsHost allows for using an IP address or a host string
@@ -45,6 +42,16 @@ pub struct Options<'a> {
     user: &'a str,
     /// The real name to use
     real: &'a str,
+    /// A Port to send procs to.
+    /// The Port will be closed when connect() returns.
+    /// Any proc sent to this port will be executed on the connection's task,
+    /// with a handle to the connection.
+    ///
+    /// When the connection shuts down, all already-scheduled procs will read from the
+    /// channel, the channel closed, and then the procs will execute. Any procs added
+    /// to the channel after the channel is drained, but before it's closed, will be
+    /// discarded.
+    commands: Option<Port<proc(&mut Conn)>>,
 }
 
 impl<'a> Options<'a> {
@@ -56,7 +63,8 @@ impl<'a> Options<'a> {
             port: port,
             nick: "ircnick",
             user: "ircuser",
-            real: "rust-irclib user"
+            real: "rust-irclib user",
+            commands: None
         }
     }
 }
@@ -99,6 +107,9 @@ pub static DefaultPort: u16 = 6667;
 /// is terminated. Returns Ok(()) after connection termination if the connection was
 /// established successfully, or Err(_) if the connection could not be established in the
 /// first place, or if an error is thrown while the connection is active.
+///
+/// This method spawns some I/O-blocked tasks, so it is recommended that it be called
+/// from a libgreen task.
 pub fn connect(opts: Options, cb: |&mut Conn, Event|) -> Result<(),Error> {
     let addr = {
         match opts.host {
@@ -121,18 +132,14 @@ pub fn connect(opts: Options, cb: |&mut Conn, Event|) -> Result<(),Error> {
 
     let mut conn = Conn{
         host: opts.host,
-        stream: Stream(BufferedStream::new(stream)),
+        write_chan: None,
         logged_in: false,
         user: User::new(opts.nick.as_bytes(), Some(opts.user.as_bytes()), None)
     };
 
     cb(&mut conn, Connected);
 
-    conn.send_command(IRCCmd(~"NICK"), [opts.nick.as_bytes()], false);
-    conn.send_command(IRCCmd(~"USER"), [opts.user.as_bytes(), bytes!("8 *"), opts.real.as_bytes()],
-                      true);
-
-    let res = conn.run(|c,e| cb(c,e));
+    let res = conn.run(stream, opts, |c,e| cb(c,e));
 
     cb(&mut conn, Disconnected);
 
@@ -143,43 +150,172 @@ pub fn connect(opts: Options, cb: |&mut Conn, Event|) -> Result<(),Error> {
 }
 
 impl<'a> Conn<'a> {
-    fn run(&mut self, cb: |&mut Conn, Event|) -> IoResult<()> {
-        loop {
-            let mut line = match self.stream {
-                Stream(ref mut stream) => {
-                    if_ok!(stream.read_until('\n' as u8))
-                },
-                StreamErr(ref err) => return Err(err.clone())
-            };
-            chomp(&mut line);
-            let line = match Line::parse(line) {
-                None => {
-                    if cfg!(debug) {
-                        let lines = str::from_utf8(line);
-                        if lines.is_some() {
-                            debug!("[DEBUG] Found non-parseable line: {}", lines.unwrap());
-                        } else {
-                            debug!("[DEBUG] Found non-parseable line: {:?}", line);
+    fn run(&mut self, stream: TcpStream, opts: Options, cb: |&mut Conn, Event|) -> IoResult<()> {
+        // spawn I/O tasks
+        let (write_port, write_chan) = Chan::new();
+        self.write_chan = Some(write_chan);
+        let (mut read_port, read_chan) = Chan::new();
+        let (mut err_port, err_chan) = SharedChan::new();
+
+        {
+            let mut write_task = task::task();
+            write_task.unwatched();
+            write_task.name("libirc writer");
+            let stream = stream.clone();
+            let err_chan = err_chan.clone();
+            write_task.spawn(proc() {
+                let mut stream = stream;
+                loop {
+                    let line = match write_port.recv_opt() {
+                        None => break,
+                        Some(v) => v
+                    };
+                    match stream.write(line).and_then(|_| stream.flush()) {
+                        Ok(_) => (),
+                        Err(e) => {
+                            if e.kind != io::EndOfFile {
+                                err_chan.send(Err(e));
+                            }
+                            break;
                         }
                     }
-                    continue;
                 }
-                Some(line) => line
-            };
-            if cfg!(debug) {
-                let line = line.to_raw();
-                let lines = str::from_utf8(line);
-                if lines.is_some() {
-                    debug!("[DEBUG] Received line: {}", lines.unwrap());
-                } else {
-                    debug!("[DEBUG] Received line: {:?}", line);
+            });
+        }
+        {
+            let mut read_task = task::task();
+            read_task.unwatched();
+            read_task.name("libirc reader");
+            read_task.spawn(proc() {
+                let mut stream = BufferedStream::new(stream);
+                loop {
+                    let mut line = match stream.read_until('\n' as u8) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            if e.kind != io::EndOfFile {
+                                err_chan.send(Err(e));
+                            }
+                            break;
+                        }
+                    };
+                    if !chomp(&mut line) {
+                        // no line terminator? Must have hit EOF
+                        break;
+                    }
+                    if line.len() > 0 {
+                        if !read_chan.try_send(line) {
+                            break;
+                        }
+                    }
+                }
+            })
+        }
+
+        // send handshake commands
+        self.send_command(IRCCmd(~"NICK"), [opts.nick.as_bytes()], false);
+        self.send_command(IRCCmd(~"USER"), [opts.user.as_bytes(), bytes!("8 *"),
+                          opts.real.as_bytes()], true);
+
+
+        // run event loop
+        // need to do some shenanigans with scoping to make borrowck happy
+        let mut result = Ok(());
+        let procs = {
+            let select = comm::Select::new();
+            let mut read_handle = select.add(&mut read_port);
+            let mut err_handle = select.add(&mut err_port);
+            let mut commands = opts.commands;
+            let mut cmd_handle = commands.as_mut().map(|p| select.add(p));
+            loop {
+                // wait on the Select, but ignore the id
+                // On each pass we simply check all ports. Keeps things a bit more fair.
+                select.wait();
+                match err_handle.try_recv() {
+                    comm::Empty => (),
+                    comm::Disconnected => break,
+                    comm::Data(err) => {
+                        result = err;
+                        break;
+                    }
+                }
+                if cmd_handle.is_some() {
+                    match cmd_handle.as_mut().unwrap().try_recv() {
+                        comm::Empty => (),
+                        comm::Disconnected => {
+                            cmd_handle = None;
+                        }
+                        comm::Data(cmd) => {
+                            cmd(self);
+                        }
+                    }
+                }
+                let line = match read_handle.try_recv() {
+                    comm::Empty => continue,
+                    comm::Disconnected => break,
+                    comm::Data(line) => line
+                };
+                let line = match Line::parse(line) {
+                    None => {
+                        debug!("[DEBUG] Found non-parseable line: {}", str::from_utf8_lossy(line));
+                        continue;
+                    }
+                    Some(line) => line
+                };
+                if log_enabled!(::std::logging::DEBUG) {
+                    let line = line.to_raw();
+                    debug!("[DEBUG] Received line: {}", str::from_utf8_lossy(line));
+                }
+                handlers::handle_line(self, &line);
+                if self.logged_in {
+                    cb(self, LineReceived(line));
                 }
             }
-            handlers::handle_line(self, &line);
-            if self.logged_in {
-                cb(self, LineReceived(line));
+            if result.is_ok() {
+                // check the err_handle one more time
+                match err_handle.try_recv() {
+                    comm::Data(err) => {
+                        result = err;
+                    }
+                    _ => ()
+                }
+            }
+
+            // drain the commands
+            match cmd_handle {
+                None => None,
+                Some(mut handle) => {
+                    let mut procs = ~[];
+                    loop {
+                        match handle.try_recv() {
+                            comm::Empty | comm::Disconnected => break,
+                            comm::Data(cmd) => procs.push(cmd)
+                        }
+                    }
+                    Some(procs)
+                }
+            }
+        };
+        // at this point the commands port is out of scope and therefore closed
+        // ensure our write handle is closed out, in case we stopped due to read shutting down,
+        // and then run any buffered procs
+        self.write_chan = None;
+        match procs {
+            None => (),
+            Some(procs) => {
+                for cmd in procs.move_iter() {
+                    cmd(self);
+                }
             }
         }
+
+        // return the result
+        result
+    }
+
+    /// Returns `true` if the connection is still active
+    /// (or was at the last pass through the runloop).
+    pub fn is_connected(&self) -> bool {
+        self.write_chan.is_some()
     }
 
     /// Returns the host that was used to create this Conn
@@ -208,10 +344,10 @@ impl<'a> Conn<'a> {
     ///
     /// The add_colon flag causes the final argument in the args list to have a ':' prepended.
     pub fn send_command<V: Vector<u8>>(&mut self, cmd: Command, args: &[V], add_colon: bool) {
-        match {
-            let stream = match self.stream {
-                Stream(ref mut stream) => stream,
-                StreamErr(_) => return
+        if !{
+            let chan = match self.write_chan {
+                None => return,
+                Some(ref mut c) => c
             };
             let mut line = [0u8, ..512];
             let len = {
@@ -270,22 +406,11 @@ impl<'a> Conn<'a> {
                 }
                 510 - buf.len()
             };
-            if cfg!(debug) {
-                let lines = str::from_utf8(line.slice_to(len));
-                if lines.is_some() {
-                    debug!("[DEBUG] Sent line: {}", lines.unwrap());
-                } else {
-                    debug!("[DEBUG] Sent line: {:?}", line);
-                }
-            }
+            debug!("[DEBUG] Sent line: {}", str::from_utf8_lossy(line.slice_to(len)));
             line.mut_slice_from(len).copy_from(bytes!("\r\n"));
-            match stream.write(line.slice_to(len+2)).and_then(|_| stream.flush()) {
-                Ok(()) => None,
-                Err(e) => Some(e)
-            }
+            chan.try_send(line.slice_to(len+2).to_owned())
         } {
-            None => (),
-            Some(e) => { self.stream = StreamErr(e); }
+            self.write_chan = None;
         }
     }
 
@@ -317,14 +442,16 @@ impl<'a> Conn<'a> {
     }
 }
 
-fn chomp(s: &mut ~[u8]) {
+fn chomp(s: &mut ~[u8]) -> bool {
     if s.ends_with(bytes!("\r\n")) {
         let len = s.len() - 2;
         s.truncate(len);
+        true
     } else if s.ends_with(bytes!("\n")) {
         let len = s.len() - 1;
         s.truncate(len);
-    }
+        true
+    } else { false }
 }
 
 /// An IRC command

@@ -17,7 +17,7 @@ example/ircbot: example/example.rs $(LIBNAME)
 	rustc -L . -O $<
 
 clean:
-	-rm -f example/ircbot
+	-rm -f ircbot
 	-rm -f $(LIBNAME) test-irc
 
 test: test-irc

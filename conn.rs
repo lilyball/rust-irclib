@@ -154,8 +154,8 @@ impl<'a> Conn<'a> {
         // spawn I/O tasks
         let (write_port, write_chan) = Chan::new();
         self.write_chan = Some(write_chan);
-        let (mut read_port, read_chan) = Chan::new();
-        let (mut err_port, err_chan) = SharedChan::new();
+        let (read_port, read_chan) = Chan::new();
+        let (err_port, err_chan) = Chan::new();
 
         {
             let mut write_task = task::task();
@@ -222,15 +222,20 @@ impl<'a> Conn<'a> {
         let mut result = Ok(());
         let procs = {
             let select = comm::Select::new();
-            let mut read_handle = select.add(&mut read_port);
-            let mut err_handle = select.add(&mut err_port);
-            let mut commands = opts.commands;
-            let mut cmd_handle = commands.as_mut().map(|p| select.add(p));
+            let mut read_handle = select.handle(&read_port);
+            unsafe { read_handle.add() }
+            let mut err_handle = select.handle(&err_port);
+            unsafe { err_handle.add() }
+            let commands = opts.commands;
+            let mut cmd_handle = commands.as_ref().map(|p| select.handle(p));
+            if cmd_handle.is_some() {
+                unsafe { cmd_handle.as_mut().unwrap().add(); }
+            }
             loop {
                 // wait on the Select, but ignore the id
                 // On each pass we simply check all ports. Keeps things a bit more fair.
                 select.wait();
-                match err_handle.try_recv() {
+                match err_port.try_recv() {
                     comm::Empty => (),
                     comm::Disconnected => break,
                     comm::Data(err) => {
@@ -238,10 +243,11 @@ impl<'a> Conn<'a> {
                         break;
                     }
                 }
-                if cmd_handle.is_some() {
-                    match cmd_handle.as_mut().unwrap().try_recv() {
+                if commands.is_some() {
+                    match commands.as_ref().unwrap().try_recv() {
                         comm::Empty => (),
                         comm::Disconnected => {
+                            unsafe { cmd_handle.as_mut().unwrap().remove(); }
                             cmd_handle = None;
                         }
                         comm::Data(cmd) => {
@@ -249,7 +255,7 @@ impl<'a> Conn<'a> {
                         }
                     }
                 }
-                let line = match read_handle.try_recv() {
+                let line = match read_port.try_recv() {
                     comm::Empty => continue,
                     comm::Disconnected => break,
                     comm::Data(line) => line
@@ -272,7 +278,7 @@ impl<'a> Conn<'a> {
             }
             if result.is_ok() {
                 // check the err_handle one more time
-                match err_handle.try_recv() {
+                match err_port.try_recv() {
                     comm::Data(err) => {
                         result = err;
                     }
@@ -281,12 +287,12 @@ impl<'a> Conn<'a> {
             }
 
             // drain the commands
-            match cmd_handle {
+            match commands {
                 None => None,
-                Some(mut handle) => {
+                Some(ref port) => {
                     let mut procs = ~[];
                     loop {
-                        match handle.try_recv() {
+                        match port.try_recv() {
                             comm::Empty | comm::Disconnected => break,
                             comm::Data(cmd) => procs.push(cmd)
                         }

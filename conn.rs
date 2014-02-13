@@ -431,9 +431,14 @@ impl<'a> Conn<'a> {
     }
 
     /// Quits the connection
-    pub fn quit(&mut self) {
-        let args: &[&[u8]] = [];
-        self.send_command(IRCCmd(~"QUIT"), args, false);
+    /// Pass [] for the message to use the default.
+    pub fn quit(&mut self, msg: &[u8]) {
+        if msg.is_empty() {
+            let args: &[&[u8]] = [];
+            self.send_command(IRCCmd(~"QUIT"), args, false);
+        } else {
+            self.send_command(IRCCmd(~"QUIT"), [msg], true);
+        }
     }
 
     /// Sends a PRIVMSG
@@ -443,8 +448,23 @@ impl<'a> Conn<'a> {
     }
 
     /// Sends a JOIN
-    pub fn join(&mut self, room: &[u8]) {
-        self.send_command(IRCCmd(~"JOIN"), [room], false);
+    /// Pass [] for keys if there are none.
+    pub fn join(&mut self, room: &[u8], keys: &[u8]) {
+        if keys.is_empty() {
+            self.send_command(IRCCmd(~"JOIN"), [room], false);
+        } else {
+            self.send_command(IRCCmd(~"JOIN"), [room.as_slice(), keys.as_slice()], false);
+        }
+    }
+
+    /// Sends a PART
+    /// Pass [] for the message to use the default.
+    pub fn part(&mut self, room: &[u8], msg: &[u8]) {
+        if msg.is_empty() {
+            self.send_command(IRCCmd(~"PART"), [room], false);
+        } else {
+            self.send_command(IRCCmd(~"PART"), [room.as_slice(), msg.as_slice()], true);
+        }
     }
 }
 

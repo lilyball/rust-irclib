@@ -39,7 +39,7 @@ fn handler(conn: &mut Conn, event: Event) {
                 Line{command: IRCCode(1), ..} => {
                     println!("Logged in");
                     // we've logged in
-                    conn.join(bytes!("##rustirclib"))
+                    conn.join(bytes!("##rustirclib"), [])
                 }
                 Line{command: IRCCmd(~"JOIN"), args, prefix: Some(prefix) } => {
                     if prefix.nick() != conn.me().nick() {
@@ -131,7 +131,7 @@ fn handle_privmsg(conn: &mut Conn, msg: &[u8], src: &[u8], dst: &[u8]) {
         }
         CommandMessage(cmd) if cmd == bytes!("quit") => {
             println!("Quitting...");
-            conn.quit();
+            conn.quit([]);
         }
         _ => ()
     }

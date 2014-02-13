@@ -80,7 +80,7 @@ mod handshake {
         if modified {
             conn.set_nick(nick);
         } else {
-            conn.quit();
+            conn.quit([]);
         }
     }
 }

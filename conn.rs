@@ -207,7 +207,7 @@ impl<'a> Conn<'a> {
                             break;
                         }
                     };
-                    if !chomp(&mut line) {
+                    if !chomp_owned(&mut line) {
                         // no line terminator? Must have hit EOF
                         break;
                     }
@@ -429,6 +429,28 @@ impl<'a> Conn<'a> {
         }
     }
 
+    /// Sends a raw command to the server
+    ///
+    /// The line is sent exactly as provided, except truncated to 510 characters
+    /// and terminated with \r\n.
+    pub fn send_raw(&mut self, raw: &[u8]) {
+        let raw = chomp(raw);
+        if raw.is_empty() { return }
+        if !{
+            let chan = match self.write_chan {
+                None => return,
+                Some(ref mut c) => c
+            };
+            let mut line = [0u8, ..512];
+            let len = line.mut_slice_to(510).copy_from(raw);
+            debug!("[DEBUG] Sent line: {}", str::from_utf8_lossy(line.slice_to(len)));
+            line.mut_slice_from(len).copy_from(bytes!("\r\n"));
+            chan.try_send(line.slice_to(len+2).to_owned())
+        } {
+            self.write_chan = None;
+        }
+    }
+
     /// Sets the user's nickname.
     pub fn set_nick<V: CloneableVector<u8>>(&mut self, nick: V) {
         let nick = nick.into_owned();
@@ -477,16 +499,28 @@ impl<'a> Conn<'a> {
     }
 }
 
-fn chomp(s: &mut ~[u8]) -> bool {
-    if s.ends_with(bytes!("\r\n")) {
-        let len = s.len() - 2;
-        s.truncate(len);
-        true
-    } else if s.ends_with(bytes!("\n")) {
-        let len = s.len() - 1;
+fn chomp_owned(s: &mut ~[u8]) -> bool {
+    let len = chomp(s.as_slice()).len();
+    if len < s.len() {
         s.truncate(len);
         true
     } else { false }
+}
+
+fn chomp<'a>(s: &'a [u8]) -> &'a [u8] {
+    if s.len() > 0 {
+        match s[s.len()-1] as char {
+            '\r' => s.slice_to(s.len()-1),
+            '\n' => {
+                if s.len() > 1 && s[s.len()-2] == '\r' as u8 {
+                    s.slice_to(s.len()-2)
+                } else {
+                    s.slice_to(s.len()-1)
+                }
+            }
+            _ => s
+        }
+    } else { s }
 }
 
 /// An IRC command

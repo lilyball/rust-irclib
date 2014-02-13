@@ -30,6 +30,15 @@ pub enum OptionsHost<'a> {
     Addr(IpAddr)
 }
 
+impl<'a> fmt::Show for OptionsHost<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            Host(s) => f.pad(s),
+            Addr(ref ip) => f.pad(ip.to_str())
+        }
+    }
+}
+
 /// Options used with Conn for connecting to the server.
 pub struct Options<'a> {
     /// The server host to connect to

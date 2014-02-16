@@ -60,7 +60,7 @@ pub struct Options<'a> {
     /// channel, the channel closed, and then the procs will execute. Any procs added
     /// to the channel after the channel is drained, but before it's closed, will be
     /// discarded.
-    commands: Option<Port<proc(&mut Conn)>>,
+    commands: Option<Port<Cmd>>,
 }
 
 impl<'a> Options<'a> {
@@ -77,6 +77,9 @@ impl<'a> Options<'a> {
         }
     }
 }
+
+/// Typedef for commands that can be sent to the commands Port
+pub type Cmd = proc(&mut Conn);
 
 /// Events that can be handled in the callback
 pub enum Event {
@@ -110,6 +113,9 @@ impl fmt::Show for Error {
     }
 }
 
+/// Typedef for connection results
+pub type Result = ::std::result::Result<(),Error>;
+
 pub static DefaultPort: u16 = 6667;
 
 /// Connects to the remote server. This method will not return until the connection
@@ -119,7 +125,7 @@ pub static DefaultPort: u16 = 6667;
 ///
 /// This method spawns some I/O-blocked tasks, so it is recommended that it be called
 /// from a libgreen task.
-pub fn connect(opts: Options, cb: |&mut Conn, Event|) -> Result<(),Error> {
+pub fn connect(opts: Options, cb: |&mut Conn, Event|) -> Result {
     let addr = {
         match opts.host {
             Addr(x) => x,

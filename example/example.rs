@@ -12,7 +12,7 @@
 #[crate_id = "github.com/kballard/rust-irclib#ircbot:0.1"];
 #[crate_type = "bin"];
 
-extern mod irc;
+extern crate irc;
 
 use irc::conn::{Conn, Line, Event, IRCCmd, IRCCode, IRCAction};
 

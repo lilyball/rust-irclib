@@ -1,3 +1,6 @@
+env:
+  global:
+    - secure: FS+Zgh2IQRj/a2S+xJ5cGX3LqoF39ar1DZVXbmPfSv6Ko8ICva109ikH9N+gEAuuSlYBDRINrHXECWN0O4r8WdbEGtH/i+5YiZ4x5wYY3T5Z0OF9buoJNTZY4D+Y4Ab2o/pBB7621ce7LCz3Gix4/TiluMGy3ktwSD5C+6tSkCQ=
 before_install:
   - yes | sudo add-apt-repository ppa:hansjorg/rust
   - sudo apt-get update
@@ -5,3 +8,5 @@ install:
   - sudo apt-get install rust-nightly
 script:
   - make all test
+after_script:
+  - curl http://www.rust-ci.org/artifacts/put?t=$RUSTCI_TOKEN | sh

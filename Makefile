@@ -4,10 +4,13 @@ LIBNAME := $(shell rustc --crate-file-name lib.rs)
 
 lib: $(LIBNAME)
 
-all: lib example
+all: lib example doc
 
+.INTERMEDIATE: .lib.d.tmp
 $(LIBNAME):
 	rustc --dep-info lib.d -O lib.rs
+	@sed -n -e 'p;s/lib.*:/doc:/p' lib.d > .lib.d.tmp
+	@mv -f .lib.d.tmp lib.d
 
 include lib.d
 
@@ -15,6 +18,10 @@ example: example/ircbot
 
 example/ircbot: example/example.rs $(LIBNAME)
 	rustc -L . -O $<
+
+doc:
+	rustdoc lib.rs
+	@touch doc
 
 clean:
 	-rm -f ircbot

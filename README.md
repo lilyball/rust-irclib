@@ -1,4 +1,5 @@
 # rust-irclib
+[![Build Status](https://travis-ci.org/kballard/rust-irclib.png?branch=master)](https://travis-ci.org/kballard/rust-irclib)
 
 Copyright (c) 2014 Kevin Ballard
 

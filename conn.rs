@@ -632,6 +632,9 @@ impl Line {
                 IRCCmd(~"PRIVMSG") => {
                     if bytes!("ACTION") == ctcpcmd {
                         command = IRCAction(dst);
+                        if args.is_empty() {
+                            args.push(~[]);
+                        }
                     } else {
                         command = IRCCTCP(ctcpcmd, dst);
                     }

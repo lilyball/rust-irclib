@@ -173,12 +173,9 @@ impl<'a> Conn<'a> {
         let (err_port, err_chan) = Chan::new();
 
         {
-            let mut write_task = task::task();
-            write_task.unwatched();
-            write_task.name("libirc writer");
             let stream = stream.clone();
             let err_chan = err_chan.clone();
-            write_task.spawn(proc() {
+            task::task().named("libirc writer").spawn(proc() {
                 let mut stream = stream;
                 loop {
                     let line = match write_port.recv_opt() {
@@ -198,10 +195,7 @@ impl<'a> Conn<'a> {
             });
         }
         {
-            let mut read_task = task::task();
-            read_task.unwatched();
-            read_task.name("libirc reader");
-            read_task.spawn(proc() {
+            task::task().named("libirc reader").spawn(proc() {
                 let mut stream = BufferedStream::new(stream);
                 loop {
                     let mut line = match stream.read_until('\n' as u8) {

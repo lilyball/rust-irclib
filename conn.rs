@@ -20,13 +20,11 @@ mod handlers;
 /// field from the Conn object. It's meant to allow your program to provide
 /// extra data for your handler to use. It is completely ignored by this
 /// library otherwise.
-pub struct Conn<'a, Payload=()> {
+pub struct Conn<'a> {
     priv host: OptionsHost<'a>,
     priv write_chan: Option<Chan<~[u8]>>,
     priv logged_in: bool,
     priv user: User,
-    /// User-defined payload
-    payload: Payload
 }
 
 /// OptionsHost allows for using an IP address or a host string
@@ -47,6 +45,9 @@ impl<'a> fmt::Show for OptionsHost<'a> {
 }
 
 /// Options used with Conn for connecting to the server.
+///
+/// Payload is the type of the payload carried along by the connection.
+/// It's needed here for the commands channel.
 pub struct Options<'a, Payload=()> {
     /// The server host to connect to
     host: OptionsHost<'a>,
@@ -86,7 +87,7 @@ impl<'a, Payload> Options<'a, Payload> {
 }
 
 /// Typedef for commands that can be sent to the commands Port
-pub type Cmd<Payload=()> = proc(&mut Conn<Payload>);
+pub type Cmd<Payload=()> = proc(&mut Conn, &mut Payload);
 
 /// Events that can be handled in the callback
 pub enum Event {
@@ -134,8 +135,8 @@ pub static DefaultPort: u16 = 6667;
 /// from a libgreen task.
 ///
 /// Note: If your Conn has no payload, you should pass () as the payload parameter.
-pub fn connect<Payload>(opts: Options<Payload>, payload: Payload,
-                        cb: |&mut Conn<Payload>, Event|) -> Result {
+pub fn connect<Payload>(opts: Options<Payload>, mut payload: Payload,
+                        cb: |&mut Conn, Event, &mut Payload|) -> Result {
     let addr = {
         match opts.host {
             Addr(x) => x,
@@ -160,14 +161,13 @@ pub fn connect<Payload>(opts: Options<Payload>, payload: Payload,
         write_chan: None,
         logged_in: false,
         user: User::new(opts.nick.as_bytes(), Some(opts.user.as_bytes()), None),
-        payload: payload
     };
 
-    cb(&mut conn, Connected);
+    cb(&mut conn, Connected, &mut payload);
 
-    let res = conn.run(stream, opts, |c,e| cb(c,e));
+    let res = conn.run(stream, opts, &mut payload, |c,e,p| cb(c,e,p));
 
-    cb(&mut conn, Disconnected);
+    cb(&mut conn, Disconnected, &mut payload);
 
     match res {
         Err(e) => Err(ErrIO(e)),
@@ -175,9 +175,9 @@ pub fn connect<Payload>(opts: Options<Payload>, payload: Payload,
     }
 }
 
-impl<'a, Payload> Conn<'a, Payload> {
-    fn run(&mut self, stream: TcpStream, opts: Options<Payload>,
-           cb: |&mut Conn<Payload>, Event|) -> IoResult<()> {
+impl<'a> Conn<'a> {
+    fn run<Payload>(&mut self, stream: TcpStream, opts: Options<Payload>, payload: &mut Payload,
+                    cb: |&mut Conn, Event, &mut Payload|) -> IoResult<()> {
         // spawn I/O tasks
         let (write_port, write_chan) = Chan::new();
         self.write_chan = Some(write_chan);
@@ -272,7 +272,7 @@ impl<'a, Payload> Conn<'a, Payload> {
                             cmd_handle = None;
                         }
                         comm::Data(cmd) => {
-                            cmd(self);
+                            cmd(self, payload);
                         }
                     }
                 }
@@ -294,7 +294,7 @@ impl<'a, Payload> Conn<'a, Payload> {
                 }
                 handlers::handle_line(self, &line);
                 if self.logged_in {
-                    cb(self, LineReceived(line));
+                    cb(self, LineReceived(line), payload);
                 }
             }
             if result.is_ok() {
@@ -330,7 +330,7 @@ impl<'a, Payload> Conn<'a, Payload> {
             None => (),
             Some(procs) => {
                 for cmd in procs.move_iter() {
-                    cmd(self);
+                    cmd(self, payload);
                 }
             }
         }

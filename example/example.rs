@@ -24,7 +24,7 @@ fn main() {
 
     let nick = format!("rustirclib{}", rand::task_rng().gen_range(100u, 1000u));
     opts.nick = nick.as_slice();
-    match irc::conn::connect(opts, (), handler) {
+    match irc::conn::connect(opts, (), |c,e,_| handler(c,e)) {
         Ok(()) => println!("Exiting..."),
         Err(err) => println!("Connection error: {}", err)
     }

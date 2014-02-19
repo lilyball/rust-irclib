@@ -478,6 +478,11 @@ impl<'a> Conn<'a> {
         self.send_command(IRCCmd(~"PRIVMSG"), [dst.as_slice(), msg.as_slice()], true)
     }
 
+    /// Sends a NOTICE
+    pub fn notice(&mut self, dst: &[u8], msg: &[u8]) {
+        self.send_command(IRCCmd(~"NOTICE"), [dst.as_slice(), msg.as_slice()], true)
+    }
+
     /// Sends a JOIN
     /// Pass [] for keys if there are none.
     pub fn join(&mut self, room: &[u8], keys: &[u8]) {

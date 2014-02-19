@@ -3,8 +3,9 @@
 
 //! Library for communicating with IRC servers
 
-#[feature(macro_rules)]; // for tests
+#[feature(macro_rules, default_type_params)];
 #[warn(missing_doc)];
+#[allow(default_type_param_usage)];
 
 use std::vec;
 

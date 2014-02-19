@@ -15,11 +15,18 @@ use User;
 mod handlers;
 
 /// Conn represenets a connection to a single IRC server
-pub struct Conn<'a> {
+///
+/// The Payload type parameter is extra state that is accessible as a public
+/// field from the Conn object. It's meant to allow your program to provide
+/// extra data for your handler to use. It is completely ignored by this
+/// library otherwise.
+pub struct Conn<'a, Payload=()> {
     priv host: OptionsHost<'a>,
     priv write_chan: Option<Chan<~[u8]>>,
     priv logged_in: bool,
-    priv user: User
+    priv user: User,
+    /// User-defined payload
+    payload: Payload
 }
 
 /// OptionsHost allows for using an IP address or a host string
@@ -40,7 +47,7 @@ impl<'a> fmt::Show for OptionsHost<'a> {
 }
 
 /// Options used with Conn for connecting to the server.
-pub struct Options<'a> {
+pub struct Options<'a, Payload=()> {
     /// The server host to connect to
     host: OptionsHost<'a>,
     /// The server port to connect to
@@ -60,12 +67,12 @@ pub struct Options<'a> {
     /// channel, the channel closed, and then the procs will execute. Any procs added
     /// to the channel after the channel is drained, but before it's closed, will be
     /// discarded.
-    commands: Option<Port<Cmd>>,
+    commands: Option<Port<Cmd<Payload>>>,
 }
 
-impl<'a> Options<'a> {
+impl<'a, Payload> Options<'a, Payload> {
     /// Returns a new Options struct with default values
-    pub fn new(host: &'a str, port: u16) -> Options<'a> {
+    pub fn new(host: &'a str, port: u16) -> Options<'a, Payload> {
         #[inline];
         Options {
             host: Host(host),
@@ -79,7 +86,7 @@ impl<'a> Options<'a> {
 }
 
 /// Typedef for commands that can be sent to the commands Port
-pub type Cmd = proc(&mut Conn);
+pub type Cmd<Payload=()> = proc(&mut Conn<Payload>);
 
 /// Events that can be handled in the callback
 pub enum Event {
@@ -125,7 +132,10 @@ pub static DefaultPort: u16 = 6667;
 ///
 /// This method spawns some I/O-blocked tasks, so it is recommended that it be called
 /// from a libgreen task.
-pub fn connect(opts: Options, cb: |&mut Conn, Event|) -> Result {
+///
+/// Note: If your Conn has no payload, you should pass () as the payload parameter.
+pub fn connect<Payload>(opts: Options<Payload>, payload: Payload,
+                        cb: |&mut Conn<Payload>, Event|) -> Result {
     let addr = {
         match opts.host {
             Addr(x) => x,
@@ -149,7 +159,8 @@ pub fn connect(opts: Options, cb: |&mut Conn, Event|) -> Result {
         host: opts.host,
         write_chan: None,
         logged_in: false,
-        user: User::new(opts.nick.as_bytes(), Some(opts.user.as_bytes()), None)
+        user: User::new(opts.nick.as_bytes(), Some(opts.user.as_bytes()), None),
+        payload: payload
     };
 
     cb(&mut conn, Connected);
@@ -164,8 +175,9 @@ pub fn connect(opts: Options, cb: |&mut Conn, Event|) -> Result {
     }
 }
 
-impl<'a> Conn<'a> {
-    fn run(&mut self, stream: TcpStream, opts: Options, cb: |&mut Conn, Event|) -> IoResult<()> {
+impl<'a, Payload> Conn<'a, Payload> {
+    fn run(&mut self, stream: TcpStream, opts: Options<Payload>,
+           cb: |&mut Conn<Payload>, Event|) -> IoResult<()> {
         // spawn I/O tasks
         let (write_port, write_chan) = Chan::new();
         self.write_chan = Some(write_chan);

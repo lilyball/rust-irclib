@@ -57,11 +57,13 @@ fn handler(conn: &mut Conn, event: Event) {
                 }
                 Line{command: IRCCmd(cmd@~"PRIVMSG"), args, prefix } |
                 Line{command: IRCCmd(cmd@~"NOTICE"), args, prefix } => {
-                    let (src, dst, msg) = match (args, prefix.is_some()) {
-                        ([dst, msg], true) => {
+                    let (src, dst, msg) = match prefix {
+                        Some(_) if args.len() == 2 => {
+                            let mut args = args;
+                            let (dst, msg) = (args.swap_remove(0), args[0]);
                             (prefix.as_ref().unwrap().nick(), dst, msg)
                         }
-                        (args, _) => {
+                        _ => {
                             print!("ERROR: Unexpected {} line: ", cmd);
                             let line = Line{command: IRCCmd(cmd), args: args, prefix: prefix};
                             println!("{}", line_desc(&line));
@@ -75,11 +77,12 @@ fn handler(conn: &mut Conn, event: Event) {
                     handle_privmsg(conn, msg, src, dst)
                 }
                 Line{command: IRCAction(dst), args, prefix } => {
-                    let (src, msg) = match (args, prefix.is_some()) {
-                        ([msg], true) => {
+                    let (src, msg) = match prefix {
+                        Some(_) if args.len() == 1 => {
+                            let msg = args[0];
                             (prefix.as_ref().unwrap().nick(), msg)
                         }
-                        (args, _) => {
+                        _ => {
                             let line = Line{command: IRCAction(dst), args: args, prefix: prefix};
                             println!("ERROR: Unexpected ACTION line: {}", line_desc(&line));
                             return;

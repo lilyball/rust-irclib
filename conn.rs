@@ -143,8 +143,11 @@ pub fn connect<Payload>(opts: Options<Payload>, mut payload: Payload,
             Host(host) => {
                 match addrinfo::get_host_addresses(host) {
                     Err(e) => return Err(ErrResolve(e)),
-                    Ok([x, ..]) => x,
-                    Ok([]) => fail!("addrinfo returned 0 addresses")
+                    Ok(v) => if v.len() == 1 {
+                        v[0]
+                    } else {
+                        fail!("addrinfo returned 0 addresses")
+                    }
                 }
             }
         }

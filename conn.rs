@@ -568,6 +568,26 @@ impl Command {
     }
 }
 
+impl fmt::Show for Command {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            IRCCmd(ref s) => write!(f.buf, "IRCCmd({})", *s),
+            IRCCode(code) => write!(f.buf, "IRCCode({})", code),
+            IRCAction(ref v) => write!(f.buf, "IRCAction({})", str::from_utf8_lossy(v.as_slice())),
+            IRCCTCP(ref cmd, ref dst) => {
+                let cmd = str::from_utf8_lossy(cmd.as_slice());
+                let dst = str::from_utf8_lossy(dst.as_slice());
+                write!(f.buf, "IRCCTCP({}, {})", cmd, dst)
+            }
+            IRCCTCPReply(ref cmd, ref dst) => {
+                let cmd = str::from_utf8_lossy(cmd.as_slice());
+                let dst = str::from_utf8_lossy(dst.as_slice());
+                write!(f.buf, "IRCCTCPReply({}, {})", cmd, dst)
+            }
+        }
+    }
+}
+
 /// A parsed line
 #[deriving(Eq,Clone)]
 pub struct Line {
@@ -577,6 +597,19 @@ pub struct Line {
     command: Command,
     /// Any arguments
     args: ~[~[u8]],
+}
+
+impl fmt::Show for Line {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        try!(write!(f.buf, r"Line\{ prefix: {}, command: {}, args: [", self.prefix, self.command));
+        for (i, v) in self.args.iter().enumerate() {
+            if i != 0 {
+                try!(write!(f.buf, ", "));
+            }
+            try!(write!(f.buf, "{}", str::from_utf8_lossy(v.as_slice())));
+        }
+        write!(f.buf, "]")
+    }
 }
 
 impl Line {

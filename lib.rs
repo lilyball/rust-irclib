@@ -5,9 +5,8 @@
 
 #[feature(macro_rules, default_type_params)];
 #[warn(missing_doc)];
-#[allow(default_type_param_usage)];
 
-use std::vec;
+use std::{fmt, str, vec};
 
 pub mod conn;
 
@@ -97,6 +96,13 @@ impl User {
 impl Eq for User {
     fn eq(&self, other: &User) -> bool {
         self.raw == other.raw
+    }
+}
+
+impl fmt::Show for User {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let s = str::from_utf8_lossy(self.raw.as_slice());
+        f.pad(s.as_slice())
     }
 }
 

@@ -60,7 +60,7 @@ fn handler(conn: &mut Conn, event: Event) {
                     let (src, dst, msg) = match prefix {
                         Some(_) if args.len() == 2 => {
                             let mut args = args;
-                            let (dst, msg) = (args.swap_remove(0), args[0]);
+                            let (dst, msg) = (args.swap_remove(0).unwrap(), args[0]);
                             (prefix.as_ref().unwrap().nick(), dst, msg)
                         }
                         _ => {
@@ -142,6 +142,5 @@ fn handle_privmsg(conn: &mut Conn, msg: &[u8], src: &[u8], dst: &[u8]) {
 
 fn line_desc(line: &Line) -> ~str {
     let raw = line.to_raw();
-    let raws = str::from_utf8(raw);
-    raws.map(|s| s.to_owned()).unwrap_or_else(|| format!("{:?}", raw))
+    str::from_utf8_lossy(raw).into_owned()
 }

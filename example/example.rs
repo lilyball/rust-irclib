@@ -13,11 +13,12 @@
 #[crate_type = "bin"];
 
 extern crate irc;
+extern crate rand;
 
 use irc::conn::{Conn, Line, Event, IRCCmd, IRCCode, IRCAction};
 
-use std::{rand, str};
-use std::rand::Rng;
+use std::str;
+use rand::Rng;
 
 fn main() {
     let mut opts = irc::conn::Options::new("chat.freenode.net", irc::conn::DefaultPort);

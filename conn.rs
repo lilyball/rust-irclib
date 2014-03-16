@@ -286,12 +286,12 @@ impl<'a> Conn<'a> {
                 };
                 let line = match Line::parse(line) {
                     None => {
-                        debug!("[DEBUG] Found non-parseable line: {}", str::from_utf8_lossy(line));
+                        info!("[DEBUG] Found non-parseable line: {}", str::from_utf8_lossy(line));
                         continue;
                     }
                     Some(line) => line
                 };
-                if log_enabled!(::std::logging::DEBUG) {
+                if log_enabled!(::log::DEBUG) {
                     let line = line.to_raw();
                     debug!("[DEBUG] Received line: {}", str::from_utf8_lossy(line));
                 }

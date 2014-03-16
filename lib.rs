@@ -3,8 +3,11 @@
 
 //! Library for communicating with IRC servers
 
-#[feature(macro_rules, default_type_params)];
+#[feature(macro_rules, default_type_params, phase)];
 #[warn(missing_doc)];
+
+#[phase(syntax, link)]
+extern crate log;
 
 use std::{fmt, str, vec};
 

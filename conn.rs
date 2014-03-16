@@ -22,7 +22,7 @@ mod handlers;
 /// library otherwise.
 pub struct Conn<'a> {
     priv host: OptionsHost<'a>,
-    priv write_chan: Option<Chan<~[u8]>>,
+    priv write_tx: Option<Sender<~[u8]>>,
     priv logged_in: bool,
     priv user: User,
 }
@@ -68,7 +68,7 @@ pub struct Options<'a, Payload=()> {
     /// channel, the channel closed, and then the procs will execute. Any procs added
     /// to the channel after the channel is drained, but before it's closed, will be
     /// discarded.
-    commands: Option<Port<Cmd<Payload>>>,
+    commands: Option<Receiver<Cmd<Payload>>>,
 }
 
 impl<'a, Payload> Options<'a, Payload> {
@@ -161,7 +161,7 @@ pub fn connect<Payload>(opts: Options<Payload>, mut payload: Payload,
 
     let mut conn = Conn{
         host: opts.host,
-        write_chan: None,
+        write_tx: None,
         logged_in: false,
         user: User::new(opts.nick.as_bytes(), Some(opts.user.as_bytes()), None),
     };
@@ -182,18 +182,18 @@ impl<'a> Conn<'a> {
     fn run<Payload>(&mut self, stream: TcpStream, opts: Options<Payload>, payload: &mut Payload,
                     cb: |&mut Conn, Event, &mut Payload|) -> IoResult<()> {
         // spawn I/O tasks
-        let (write_port, write_chan) = Chan::new();
-        self.write_chan = Some(write_chan);
-        let (read_port, read_chan) = Chan::new();
-        let (err_port, err_chan) = Chan::new();
+        let (write_tx, write_rx) = channel();
+        self.write_tx = Some(write_tx);
+        let (read_tx, read_rx) = channel();
+        let (err_tx, err_rx) = channel();
 
         {
             let stream = stream.clone();
-            let err_chan = err_chan.clone();
+            let err_tx = err_tx.clone();
             task::task().named("libirc writer").spawn(proc() {
                 let mut stream = stream;
                 loop {
-                    let line = match write_port.recv_opt() {
+                    let line = match write_rx.recv_opt() {
                         None => break,
                         Some(v) => v
                     };
@@ -201,7 +201,7 @@ impl<'a> Conn<'a> {
                         Ok(_) => (),
                         Err(e) => {
                             if e.kind != io::EndOfFile {
-                                err_chan.send(Err(e));
+                                err_tx.send(Err(e));
                             }
                             break;
                         }
@@ -217,7 +217,7 @@ impl<'a> Conn<'a> {
                         Ok(v) => v,
                         Err(e) => {
                             if e.kind != io::EndOfFile {
-                                err_chan.send(Err(e));
+                                err_tx.send(Err(e));
                             }
                             break;
                         }
@@ -227,7 +227,7 @@ impl<'a> Conn<'a> {
                         break;
                     }
                     if line.len() > 0 {
-                        if !read_chan.try_send(line) {
+                        if !read_tx.try_send(line) {
                             break;
                         }
                     }
@@ -246,9 +246,9 @@ impl<'a> Conn<'a> {
         let mut result = Ok(());
         let procs = {
             let select = comm::Select::new();
-            let mut read_handle = select.handle(&read_port);
+            let mut read_handle = select.handle(&read_rx);
             unsafe { read_handle.add() }
-            let mut err_handle = select.handle(&err_port);
+            let mut err_handle = select.handle(&err_rx);
             unsafe { err_handle.add() }
             let commands = opts.commands;
             let mut cmd_handle = commands.as_ref().map(|p| select.handle(p));
@@ -259,7 +259,7 @@ impl<'a> Conn<'a> {
                 // wait on the Select, but ignore the id
                 // On each pass we simply check all ports. Keeps things a bit more fair.
                 select.wait();
-                match err_port.try_recv() {
+                match err_rx.try_recv() {
                     comm::Empty => (),
                     comm::Disconnected => break,
                     comm::Data(err) => {
@@ -279,7 +279,7 @@ impl<'a> Conn<'a> {
                         }
                     }
                 }
-                let line = match read_port.try_recv() {
+                let line = match read_rx.try_recv() {
                     comm::Empty => continue,
                     comm::Disconnected => break,
                     comm::Data(line) => line
@@ -302,7 +302,7 @@ impl<'a> Conn<'a> {
             }
             if result.is_ok() {
                 // check the err_handle one more time
-                match err_port.try_recv() {
+                match err_rx.try_recv() {
                     comm::Data(err) => {
                         result = err;
                     }
@@ -328,7 +328,7 @@ impl<'a> Conn<'a> {
         // at this point the commands port is out of scope and therefore closed
         // ensure our write handle is closed out, in case we stopped due to read shutting down,
         // and then run any buffered procs
-        self.write_chan = None;
+        self.write_tx = None;
         match procs {
             None => (),
             Some(procs) => {
@@ -345,7 +345,7 @@ impl<'a> Conn<'a> {
     /// Returns `true` if the connection is still active
     /// (or was at the last pass through the runloop).
     pub fn is_connected(&self) -> bool {
-        self.write_chan.is_some()
+        self.write_tx.is_some()
     }
 
     /// Returns the host that was used to create this Conn
@@ -375,7 +375,7 @@ impl<'a> Conn<'a> {
     /// The add_colon flag causes the final argument in the args list to have a ':' prepended.
     pub fn send_command<V: Vector<u8>>(&mut self, cmd: Command, args: &[V], add_colon: bool) {
         if !{
-            let chan = match self.write_chan {
+            let chan = match self.write_tx {
                 None => return,
                 Some(ref mut c) => c
             };
@@ -440,7 +440,7 @@ impl<'a> Conn<'a> {
             line.mut_slice_from(len).copy_from(bytes!("\r\n"));
             chan.try_send(line.slice_to(len+2).to_owned())
         } {
-            self.write_chan = None;
+            self.write_tx = None;
         }
     }
 
@@ -452,7 +452,7 @@ impl<'a> Conn<'a> {
         let raw = chomp(raw);
         if raw.is_empty() { return }
         if !{
-            let chan = match self.write_chan {
+            let chan = match self.write_tx {
                 None => return,
                 Some(ref mut c) => c
             };
@@ -462,7 +462,7 @@ impl<'a> Conn<'a> {
             line.mut_slice_from(len).copy_from(bytes!("\r\n"));
             chan.try_send(line.slice_to(len+2).to_owned())
         } {
-            self.write_chan = None;
+            self.write_tx = None;
         }
     }
 
@@ -681,8 +681,13 @@ impl Line {
                     args = ~[];
                 }
             }
-            match command {
-                IRCCmd(~"PRIVMSG") => {
+            let cmdstr = match command {
+                IRCCmd(ref s) if "PRIVMSG" == *s => "PRIVMSG",
+                IRCCmd(ref s) if "NOTICE" == *s => "NOTICE",
+                _ => unreachable!()
+            };
+            match cmdstr {
+                "PRIVMSG" => {
                     if bytes!("ACTION") == ctcpcmd {
                         command = IRCAction(dst);
                         if args.is_empty() {
@@ -692,7 +697,7 @@ impl Line {
                         command = IRCCTCP(ctcpcmd, dst);
                     }
                 }
-                IRCCmd(~"NOTICE") => {
+                "NOTICE" => {
                     command = IRCCTCPReply(ctcpcmd, dst);
                 }
                 _ => unreachable!()

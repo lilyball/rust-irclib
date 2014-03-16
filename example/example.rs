@@ -44,41 +44,44 @@ fn handler(conn: &mut Conn, event: Event) {
                     // we've logged in
                     conn.join(bytes!("##rustirclib"), [])
                 }
-                Line{command: IRCCmd(~"JOIN"), args, prefix: Some(prefix) } => {
-                    if prefix.nick() != conn.me().nick() {
-                        return;
-                    }
-                    if args.is_empty() {
-                        let line = Line{command: IRCCmd(~"JOIN"), args: args, prefix: Some(prefix)};
-                        println!("ERROR: Invalid JOIN message received: {}", line_desc(&line));
-                        return;
-                    }
-                    let chan = args[0];
-                    conn.privmsg(chan, bytes!("Hello"));
-                    let chan = str::from_utf8(chan).unwrap_or("(invalid utf8)");
-                    println!("JOINED: {}", chan);
-                }
-                Line{command: IRCCmd(cmd@~"PRIVMSG"), args, prefix } |
-                Line{command: IRCCmd(cmd@~"NOTICE"), args, prefix } => {
-                    let (src, dst, msg) = match prefix {
-                        Some(_) if args.len() == 2 => {
-                            let mut args = args;
-                            let (dst, msg) = (args.swap_remove(0).unwrap(), args[0]);
-                            (prefix.as_ref().unwrap().nick(), dst, msg)
-                        }
-                        _ => {
-                            print!("ERROR: Unexpected {} line: ", cmd);
-                            let line = Line{command: IRCCmd(cmd), args: args, prefix: prefix};
-                            println!("{}", line_desc(&line));
+                Line{command: IRCCmd(cmd), args, prefix: prefix } => match cmd.as_slice() {
+                    "JOIN" if prefix.is_some() => {
+                        let prefix = prefix.unwrap();
+                        if prefix.nick() != conn.me().nick() {
                             return;
                         }
-                    };
-                    let dsts = str::from_utf8(dst).unwrap_or("(invalid utf8)");
-                    let srcs = str::from_utf8(src).unwrap_or("(invalid utf8)");
-                    let msgs = str::from_utf8(msg).unwrap_or("(invalid utf8)");
-                    println!("<-- {}({}) {}: {}", cmd, dsts, srcs, msgs);
-                    handle_privmsg(conn, msg, src, dst)
-                }
+                        if args.is_empty() {
+                            let line = Line{command: IRCCmd(~"JOIN"), args: args, prefix: Some(prefix)};
+                            println!("ERROR: Invalid JOIN message received: {}", line_desc(&line));
+                            return;
+                        }
+                        let chan = args[0];
+                        conn.privmsg(chan, bytes!("Hello"));
+                        let chan = str::from_utf8(chan).unwrap_or("(invalid utf8)");
+                        println!("JOINED: {}", chan);
+                    }
+                    "PRIVMSG" | "NOTICE" => {
+                        let (src, dst, msg) = match prefix {
+                            Some(_) if args.len() == 2 => {
+                                let mut args = args;
+                                let (dst, msg) = (args.swap_remove(0).unwrap(), args[0]);
+                                (prefix.as_ref().unwrap().nick(), dst, msg)
+                            }
+                            _ => {
+                                print!("ERROR: Unexpected {} line: ", cmd);
+                                let line = Line{command: IRCCmd(cmd), args: args, prefix: prefix};
+                                println!("{}", line_desc(&line));
+                                return;
+                            }
+                        };
+                        let dsts = str::from_utf8(dst).unwrap_or("(invalid utf8)");
+                        let srcs = str::from_utf8(src).unwrap_or("(invalid utf8)");
+                        let msgs = str::from_utf8(msg).unwrap_or("(invalid utf8)");
+                        println!("<-- {}({}) {}: {}", cmd, dsts, srcs, msgs);
+                        handle_privmsg(conn, msg, src, dst)
+                    }
+                    _ => ()
+                },
                 Line{command: IRCAction(dst), args, prefix } => {
                     let (src, msg) = match prefix {
                         Some(_) if args.len() == 1 => {

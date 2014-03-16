@@ -12,6 +12,8 @@
 #[crate_id = "github.com/kballard/rust-irclib#ircbot:0.1"];
 #[crate_type = "bin"];
 
+#[allow(deprecated_owned_vector)];
+
 extern crate irc;
 extern crate rand;
 

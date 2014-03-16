@@ -5,6 +5,7 @@
 
 #[feature(macro_rules, default_type_params, phase)];
 #[warn(missing_doc)];
+#[allow(deprecated_owned_vector)];
 
 #[phase(syntax, link)]
 extern crate log;

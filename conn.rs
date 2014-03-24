@@ -6,8 +6,8 @@ use std::io::{IoError, IoResult, TcpStream, IpAddr};
 use std::io::net::addrinfo;
 use std::io::net::ip::SocketAddr;
 use std::io::BufferedStream;
-use std::{char,str,vec,uint};
-use std::vec::MutableCloneableVector;
+use std::{char,str,slice,uint};
+use std::slice::MutableCloneableVector;
 use std::cmp::min;
 use std::{comm,task};
 use User;
@@ -746,7 +746,7 @@ impl Line {
                 cap += 1 + last.len();
             }
         }
-        let mut res = vec::with_capacity(cap);
+        let mut res = slice::with_capacity(cap);
         if self.prefix.is_some() {
             res.push(':' as u8);
             res.push_all(self.prefix.as_ref().unwrap().raw());

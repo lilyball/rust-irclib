@@ -10,7 +10,7 @@
 #[phase(syntax, link)]
 extern crate log;
 
-use std::{fmt, str, vec};
+use std::{fmt, str, slice};
 
 pub mod conn;
 
@@ -55,7 +55,7 @@ impl User {
     pub fn new(nick: &[u8], user: Option<&[u8]>, host: Option<&[u8]>) -> User {
         let cap = nick.len() + user.map_or(0, |v| v.len()+1) +
                   host.map_or(0, |v| v.len()+1);
-        let mut raw = vec::with_capacity(cap);
+        let mut raw = slice::with_capacity(cap);
         raw.push_all(nick);
         if user.is_some() {
             raw.push('!' as u8);

@@ -9,10 +9,10 @@
     Any incoming message of the form "!rustirclib### quit" will cause the bot to shut down.
  */
 
-#[crate_id = "github.com/kballard/rust-irclib#ircbot:0.1"];
-#[crate_type = "bin"];
+#![crate_id = "github.com/kballard/rust-irclib#ircbot:0.1"]
+#![crate_type = "bin"]
 
-#[allow(deprecated_owned_vector)];
+#![allow(deprecated_owned_vector)]
 
 extern crate irc;
 extern crate rand;

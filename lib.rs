@@ -1,11 +1,11 @@
-#[crate_id="github.com/kballard/rust-irclib#irc:0.1"];
-#[crate_type="rlib"];
+#![crate_id="github.com/kballard/rust-irclib#irc:0.1"]
+#![crate_type="rlib"]
 
 //! Library for communicating with IRC servers
 
-#[feature(macro_rules, default_type_params, phase)];
-#[warn(missing_doc)];
-#[allow(deprecated_owned_vector)];
+#![feature(macro_rules, default_type_params, phase)]
+#![warn(missing_doc)]
+#![allow(deprecated_owned_vector)]
 
 #[phase(syntax, link)]
 extern crate log;

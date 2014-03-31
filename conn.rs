@@ -74,7 +74,7 @@ pub struct Options<'a, Payload=()> {
 impl<'a, Payload> Options<'a, Payload> {
     /// Returns a new Options struct with default values
     pub fn new(host: &'a str, port: u16) -> Options<'a, Payload> {
-        #[inline];
+        #![inline]
         Options {
             host: Host(host),
             port: port,
@@ -87,7 +87,7 @@ impl<'a, Payload> Options<'a, Payload> {
 }
 
 /// Typedef for commands that can be sent to the commands Port
-pub type Cmd<Payload=()> = proc(&mut Conn, &mut Payload);
+pub type Cmd<Payload=()> = proc:Send(&mut Conn, &mut Payload);
 
 /// Events that can be handled in the callback
 pub enum Event {

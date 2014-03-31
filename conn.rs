@@ -21,10 +21,10 @@ mod handlers;
 /// extra data for your handler to use. It is completely ignored by this
 /// library otherwise.
 pub struct Conn<'a> {
-    priv host: OptionsHost<'a>,
-    priv write_tx: Option<Sender<~[u8]>>,
-    priv logged_in: bool,
-    priv user: User,
+    host: OptionsHost<'a>,
+    write_tx: Option<Sender<~[u8]>>,
+    logged_in: bool,
+    user: User,
 }
 
 /// OptionsHost allows for using an IP address or a host string
@@ -50,15 +50,15 @@ impl<'a> fmt::Show for OptionsHost<'a> {
 /// It's needed here for the commands channel.
 pub struct Options<'a, Payload=()> {
     /// The server host to connect to
-    host: OptionsHost<'a>,
+    pub host: OptionsHost<'a>,
     /// The server port to connect to
-    port: u16,
+    pub port: u16,
     /// The nickname to use
-    nick: &'a str,
+    pub nick: &'a str,
     /// The username to use
-    user: &'a str,
+    pub user: &'a str,
     /// The real name to use
-    real: &'a str,
+    pub real: &'a str,
     /// A Port to send procs to.
     /// The Port will be closed when connect() returns.
     /// Any proc sent to this port will be executed on the connection's task,
@@ -68,7 +68,7 @@ pub struct Options<'a, Payload=()> {
     /// channel, the channel closed, and then the procs will execute. Any procs added
     /// to the channel after the channel is drained, but before it's closed, will be
     /// discarded.
-    commands: Option<Receiver<Cmd<Payload>>>,
+    pub commands: Option<Receiver<Cmd<Payload>>>,
 }
 
 impl<'a, Payload> Options<'a, Payload> {
@@ -592,11 +592,11 @@ impl fmt::Show for Command {
 #[deriving(Eq,Clone)]
 pub struct Line {
     /// The optional prefix
-    prefix: Option<User>,
+    pub prefix: Option<User>,
     /// The command
-    command: Command,
+    pub command: Command,
     /// Any arguments
-    args: ~[~[u8]],
+    pub args: ~[~[u8]],
 }
 
 impl fmt::Show for Line {

@@ -17,10 +17,10 @@ pub mod conn;
 /// Representation of an IRC user
 #[deriving(Clone)]
 pub struct User {
-    priv raw: ~[u8],
-    priv nicklen: uint,
-    priv user: Option<(uint, uint)>,
-    priv host: Option<(uint, uint)>
+    raw: ~[u8],
+    nicklen: uint,
+    user: Option<(uint, uint)>,
+    host: Option<(uint, uint)>
 }
 
 impl User {

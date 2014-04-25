@@ -5,12 +5,11 @@
 
 #![feature(macro_rules, default_type_params, phase)]
 #![warn(missing_doc)]
-#![allow(deprecated_owned_vector)]
 
 #[phase(syntax, link)]
 extern crate log;
 
-use std::{fmt, str, slice};
+use std::{fmt, str};
 
 pub mod conn;
 
@@ -28,7 +27,8 @@ impl User {
     /// The byte-vector should represent a string of the form
     ///
     ///     nickname[!username][@host]
-    pub fn parse<V: CloneableVector<u8>>(v: V) -> User {
+    // TODO: make v into IntoVec<u8> once it lands
+    pub fn parse(v: &[u8]) -> User {
         let v = v.into_owned();
 
         let (mut bangloc, mut atloc) = (None, None);
@@ -55,7 +55,7 @@ impl User {
     pub fn new(nick: &[u8], user: Option<&[u8]>, host: Option<&[u8]>) -> User {
         let cap = nick.len() + user.map_or(0, |v| v.len()+1) +
                   host.map_or(0, |v| v.len()+1);
-        let mut raw = slice::with_capacity(cap);
+        let mut raw = Vec::with_capacity(cap);
         raw.push_all(nick);
         if user.is_some() {
             raw.push('!' as u8);
@@ -67,7 +67,7 @@ impl User {
         }
         // instead of constructing a User directly, lets re-parse our raw string.
         // This way passing a nick of "foo!bar" or "foo@bar" will behave "properly".
-        User::parse(raw)
+        User::parse(raw.as_slice())
     }
 
     /// Returns the raw byte-vector that represents the User

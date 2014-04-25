@@ -55,16 +55,17 @@ fn handler(conn: &mut Conn, event: Event) {
                             println!("ERROR: Invalid JOIN message received: {}", line_desc(&line));
                             return;
                         }
-                        let chan = args[0];
-                        conn.privmsg(chan, bytes!("Hello"));
-                        let chan = str::from_utf8(chan).unwrap_or("(invalid utf8)");
+                        let chan = args.move_iter().next().unwrap();
+                        conn.privmsg(chan.as_slice(), bytes!("Hello"));
+                        let chan = str::from_utf8_lossy(chan.as_slice());
                         println!("JOINED: {}", chan);
                     }
                     "PRIVMSG" | "NOTICE" => {
                         let (src, dst, msg) = match prefix {
                             Some(_) if args.len() == 2 => {
                                 let mut args = args;
-                                let (dst, msg) = (args.swap_remove(0).unwrap(), args[0]);
+                                let (dst, msg) = (args.swap_remove(0).unwrap(),
+                                                  args.move_iter().next().unwrap());
                                 (prefix.as_ref().unwrap().nick(), dst, msg)
                             }
                             _ => {
@@ -74,18 +75,18 @@ fn handler(conn: &mut Conn, event: Event) {
                                 return;
                             }
                         };
-                        let dsts = str::from_utf8(dst).unwrap_or("(invalid utf8)");
-                        let srcs = str::from_utf8(src).unwrap_or("(invalid utf8)");
-                        let msgs = str::from_utf8(msg).unwrap_or("(invalid utf8)");
+                        let dsts = str::from_utf8_lossy(dst.as_slice());
+                        let srcs = str::from_utf8_lossy(src.as_slice());
+                        let msgs = str::from_utf8_lossy(msg.as_slice());
                         println!("<-- {}({}) {}: {}", cmd, dsts, srcs, msgs);
-                        handle_privmsg(conn, msg, src, dst)
+                        handle_privmsg(conn, msg.as_slice(), src, dst.as_slice())
                     }
                     _ => ()
                 },
                 Line{command: IRCAction(dst), args, prefix } => {
                     let (src, msg) = match prefix {
                         Some(_) if args.len() == 1 => {
-                            let msg = args[0];
+                            let msg = args.move_iter().next().unwrap();
                             (prefix.as_ref().unwrap().nick(), msg)
                         }
                         _ => {
@@ -94,9 +95,9 @@ fn handler(conn: &mut Conn, event: Event) {
                             return;
                         }
                     };
-                    let dst = str::from_utf8(dst).unwrap_or("(invalid utf8)");
-                    let src = str::from_utf8(src).unwrap_or("(invalid utf8)");
-                    let msg = str::from_utf8(msg).unwrap_or("(invalid utf8)");
+                    let dst = str::from_utf8_lossy(dst.as_slice());
+                    let src = str::from_utf8_lossy(src.as_slice());
+                    let msg = str::from_utf8_lossy(msg.as_slice());
                     println!("<-- PRIVMSG({}) {} {}", dst, src, msg);
                 }
                 _ => ()
@@ -148,5 +149,5 @@ fn handle_privmsg(conn: &mut Conn, msg: &[u8], src: &[u8], dst: &[u8]) {
 
 fn line_desc(line: &Line) -> ~str {
     let raw = line.to_raw();
-    str::from_utf8_lossy(raw).into_owned()
+    str::from_utf8_lossy(raw.as_slice()).into_owned()
 }

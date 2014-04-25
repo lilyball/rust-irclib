@@ -6,10 +6,11 @@ use std::io::{IoError, IoResult, TcpStream, IpAddr};
 use std::io::net::addrinfo;
 use std::io::net::ip::SocketAddr;
 use std::io::BufferedStream;
-use std::{char,str,slice,uint};
+use std::{char,str,uint};
 use std::slice::MutableCloneableVector;
 use std::cmp::min;
-use std::{comm,task};
+use std::comm;
+use std::task::TaskBuilder;
 use User;
 
 mod handlers;
@@ -87,7 +88,7 @@ impl<'a, Payload> Options<'a, Payload> {
 }
 
 /// Typedef for commands that can be sent to the commands Port
-pub type Cmd<Payload=()> = proc:Send(&mut Conn, &mut Payload);
+pub type Cmd<Payload=()> = proc(&mut Conn, &mut Payload) : Send;
 
 /// Events that can be handled in the callback
 pub enum Event {
@@ -190,12 +191,12 @@ impl<'a> Conn<'a> {
         {
             let stream = stream.clone();
             let err_tx = err_tx.clone();
-            task::task().named("libirc writer").spawn(proc() {
+            TaskBuilder::new().named("libirc writer").spawn(proc() {
                 let mut stream = stream;
                 loop {
                     let line = match write_rx.recv_opt() {
-                        None => break,
-                        Some(v) => v
+                        Err(_) => break,
+                        Ok(v) => v
                     };
                     match stream.write(line).and_then(|_| stream.flush()) {
                         Ok(_) => (),
@@ -210,7 +211,7 @@ impl<'a> Conn<'a> {
             });
         }
         {
-            task::task().named("libirc reader").spawn(proc() {
+            TaskBuilder::new().named("libirc reader").spawn(proc() {
                 let mut stream = BufferedStream::new(stream);
                 loop {
                     let mut line = match stream.read_until('\n' as u8) {
@@ -227,7 +228,7 @@ impl<'a> Conn<'a> {
                         break;
                     }
                     if line.len() > 0 {
-                        if !read_tx.try_send(line) {
+                        if read_tx.send_opt(line).is_err() {
                             break;
                         }
                     }
@@ -260,32 +261,33 @@ impl<'a> Conn<'a> {
                 // On each pass we simply check all ports. Keeps things a bit more fair.
                 select.wait();
                 match err_rx.try_recv() {
-                    comm::Empty => (),
-                    comm::Disconnected => break,
-                    comm::Data(err) => {
+                    Err(comm::Empty) => (),
+                    Err(comm::Disconnected) => break,
+                    Ok(err) => {
                         result = err;
                         break;
                     }
                 }
                 if commands.is_some() {
                     match commands.as_ref().unwrap().try_recv() {
-                        comm::Empty => (),
-                        comm::Disconnected => {
+                        Err(comm::Empty) => (),
+                        Err(comm::Disconnected) => {
                             unsafe { cmd_handle.as_mut().unwrap().remove(); }
                             cmd_handle = None;
                         }
-                        comm::Data(cmd) => {
+                        Ok(cmd) => {
                             cmd(self, payload);
                         }
                     }
                 }
                 let line = match read_rx.try_recv() {
-                    comm::Empty => continue,
-                    comm::Disconnected => break,
-                    comm::Data(line) => line
+                    Err(comm::Empty) => continue,
+                    Err(comm::Disconnected) => break,
+                    Ok(line) => line
                 };
-                let line = match Line::parse(line) {
+                let line = match Line::parse(line.as_slice()) {
                     None => {
+                        let line = line.as_slice();
                         info!("[DEBUG] Found non-parseable line: {}", str::from_utf8_lossy(line));
                         continue;
                     }
@@ -293,7 +295,7 @@ impl<'a> Conn<'a> {
                 };
                 if log_enabled!(::log::DEBUG) {
                     let line = line.to_raw();
-                    debug!("[DEBUG] Received line: {}", str::from_utf8_lossy(line));
+                    debug!("[DEBUG] Received line: {}", str::from_utf8_lossy(line.as_slice()));
                 }
                 handlers::handle_line(self, &line);
                 if self.logged_in {
@@ -303,7 +305,7 @@ impl<'a> Conn<'a> {
             if result.is_ok() {
                 // check the err_handle one more time
                 match err_rx.try_recv() {
-                    comm::Data(err) => {
+                    Ok(err) => {
                         result = err;
                     }
                     _ => ()
@@ -314,11 +316,11 @@ impl<'a> Conn<'a> {
             match commands {
                 None => None,
                 Some(ref port) => {
-                    let mut procs = ~[];
+                    let mut procs = Vec::new();
                     loop {
                         match port.try_recv() {
-                            comm::Empty | comm::Disconnected => break,
-                            comm::Data(cmd) => procs.push(cmd)
+                            Err(_) => break,
+                            Ok(cmd) => procs.push(cmd)
                         }
                     }
                     Some(procs)
@@ -403,7 +405,7 @@ impl<'a> Conn<'a> {
                     }
                     IRCAction(ref dst) | IRCCTCP(ref dst,_) => {
                         append(&mut buf, bytes!("PRIVMSG "));
-                        append(&mut buf, *dst);
+                        append(&mut buf, dst.as_slice());
                         append(&mut buf, bytes!(" :\x01"));
                         let action = match cmd {
                             IRCAction(_) => { static b: &'static [u8] = bytes!("ACTION"); b }
@@ -414,9 +416,9 @@ impl<'a> Conn<'a> {
                     }
                     IRCCTCPReply(dst, action) => {
                         append(&mut buf, bytes!("NOTICE "));
-                        append(&mut buf, dst);
+                        append(&mut buf, dst.as_slice());
                         append(&mut buf, bytes!(" :\x01"));
-                        append(&mut buf, action);
+                        append(&mut buf, action.as_slice());
                     }
                 }
                 if !args.is_empty() {
@@ -438,7 +440,7 @@ impl<'a> Conn<'a> {
             };
             debug!("[DEBUG] Sent line: {}", str::from_utf8_lossy(line.slice_to(len)));
             line.mut_slice_from(len).copy_from(bytes!("\r\n"));
-            chan.try_send(line.slice_to(len+2).to_owned())
+            chan.send_opt(line.slice_to(len+2).to_owned()).is_ok()
         } {
             self.write_tx = None;
         }
@@ -460,16 +462,15 @@ impl<'a> Conn<'a> {
             let len = line.mut_slice_to(510).copy_from(raw);
             debug!("[DEBUG] Sent line: {}", str::from_utf8_lossy(line.slice_to(len)));
             line.mut_slice_from(len).copy_from(bytes!("\r\n"));
-            chan.try_send(line.slice_to(len+2).to_owned())
+            chan.send_opt(line.slice_to(len+2).to_owned()).is_ok()
         } {
             self.write_tx = None;
         }
     }
 
     /// Sets the user's nickname.
-    pub fn set_nick<V: CloneableVector<u8>>(&mut self, nick: V) {
-        let nick = nick.into_owned();
-        self.send_command(IRCCmd(~"NICK"), [nick.as_slice()], false);
+    pub fn set_nick(&mut self, nick: &[u8]) {
+        self.send_command(IRCCmd(~"NICK"), [nick], false);
         // if we're logged in, watch for the NICK reply before changing our nick
         if !self.logged_in {
             self.user = self.user.with_nick(nick);
@@ -519,7 +520,7 @@ impl<'a> Conn<'a> {
     }
 }
 
-fn chomp_owned(s: &mut ~[u8]) -> bool {
+fn chomp_owned(s: &mut Vec<u8>) -> bool {
     let len = chomp(s.as_slice()).len();
     if len < s.len() {
         s.truncate(len);
@@ -551,11 +552,11 @@ pub enum Command {
     /// A 3-digit command code
     IRCCode(uint),
     /// CTCP actions. The first arg is the destination
-    IRCAction(~[u8]),
+    IRCAction(Vec<u8>),
     /// CTCP commands. The first arg is the command, the second is the destination
-    IRCCTCP(~[u8], ~[u8]),
+    IRCCTCP(Vec<u8>, Vec<u8>),
     /// CTCP replies. The first arg is the command, the second is the destination
-    IRCCTCPReply(~[u8], ~[u8])
+    IRCCTCPReply(Vec<u8>, Vec<u8>)
 }
 
 impl Command {
@@ -596,7 +597,7 @@ pub struct Line {
     /// The command
     pub command: Command,
     /// Any arguments
-    pub args: ~[~[u8]],
+    pub args: Vec<Vec<u8>>,
 }
 
 impl fmt::Show for Line {
@@ -646,39 +647,39 @@ impl Line {
                 return None;
             }
         };
-        let mut args = ~[];
+        let mut args = Vec::new();
         while !v.is_empty() {
             if v[0] == ':' as u8 {
-                args.push(v.slice_from(1).to_owned());
+                args.push(Vec::from_slice(v.slice_from(1)));
                 break;
             }
             let idx = match v.position_elem(&(' ' as u8)) {
                 None => {
-                    args.push(v.to_owned());
+                    args.push(Vec::from_slice(v));
                     break;
                 }
                 Some(idx) => idx
             };
-            args.push(v.slice_to(idx).to_owned());
+            args.push(Vec::from_slice(v.slice_to(idx)));
             v = v.slice_from(idx+1);
         }
-        if checkCTCP && args.last().map_or(false, |v| v.starts_with([0x1])) {
+        if checkCTCP && args.last().map_or(false, |v| v.as_slice().starts_with([0x1])) {
             let mut text = args.pop().unwrap();
-            if text.len() > 1 && text.ends_with([0x1]) {
-                text = text.slice(1,text.len()-1).to_owned();
+            if text.len() > 1 && text.as_slice().ends_with([0x1]) {
+                text = Vec::from_slice(text.slice(1,text.len()-1));
             } else {
                 text.shift();
             }
-            let dst = args[0];
+            let dst = args.move_iter().next().unwrap();
             let ctcpcmd;
-            match text.position_elem(&(' ' as u8)) {
+            match text.as_slice().position_elem(&(' ' as u8)) {
                 Some(idx) => {
-                    ctcpcmd = text.slice_to(idx).to_owned();
-                    args = ~[text.slice_from(idx+1).to_owned()];
+                    ctcpcmd = Vec::from_slice(text.slice_to(idx));
+                    args = vec![Vec::from_slice(text.slice_from(idx+1))];
                 }
                 None => {
-                    ctcpcmd = text.to_owned();
-                    args = ~[];
+                    ctcpcmd = text.clone();
+                    args = Vec::new();
                 }
             }
             let cmdstr = match command {
@@ -688,10 +689,10 @@ impl Line {
             };
             match cmdstr {
                 "PRIVMSG" => {
-                    if bytes!("ACTION") == ctcpcmd {
+                    if bytes!("ACTION") == ctcpcmd.as_slice() {
                         command = IRCAction(dst);
                         if args.is_empty() {
-                            args.push(~[]);
+                            args.push(Vec::new());
                         }
                     } else {
                         command = IRCCTCP(ctcpcmd, dst);
@@ -711,7 +712,7 @@ impl Line {
     }
 
     /// Converts into the "raw" representation :prefix cmd args
-    pub fn to_raw(&self) -> ~[u8] {
+    pub fn to_raw(&self) -> Vec<u8> {
         let mut cap = self.prefix.as_ref().map_or(0, |s| 1+s.raw().len()+1);
         let mut found_space = false;
         cap += match self.command {
@@ -746,7 +747,7 @@ impl Line {
                 cap += 1 + last.len();
             }
         }
-        let mut res = slice::with_capacity(cap);
+        let mut res = Vec::with_capacity(cap);
         if self.prefix.is_some() {
             res.push(':' as u8);
             res.push_all(self.prefix.as_ref().unwrap().raw());
@@ -764,18 +765,18 @@ impl Line {
             }
             IRCAction(ref dst) => {
                 res.push_all(bytes!("PRIVMSG "));
-                res.push_all(*dst);
+                res.push_all(dst.as_slice());
                 res.push_all(bytes!(" :\x01ACTION"));
             }
             IRCCTCP(ref cmd, ref dst) => {
                 res.push_all(bytes!("PRIVMSG "));
-                res.push_all(*dst);
+                res.push_all(dst.as_slice());
                 res.push_all(bytes!(" :\x01"));
                 res.push_all(cmd.as_slice());
             }
             IRCCTCPReply(ref cmd, ref dst) => {
                 res.push_all(bytes!("NOTICE "));
-                res.push_all(*dst);
+                res.push_all(dst.as_slice());
                 res.push_all(bytes!(" :\x01"));
                 res.push_all(cmd.as_slice());
             }
@@ -783,21 +784,21 @@ impl Line {
         if self.command.is_ctcp() {
             for arg in self.args.iter() {
                 res.push(' ' as u8);
-                res.push_all(*arg);
+                res.push_all(arg.as_slice());
             }
             res.push(0x1);
         } else if !self.args.is_empty() {
             if self.args.len() > 1 {
                 for arg in self.args.init().iter() {
                     res.push(' ' as u8);
-                    res.push_all(*arg);
+                    res.push_all(arg.as_slice());
                 }
             }
             res.push(' ' as u8);
             if found_space {
                 res.push(':' as u8);
             }
-            res.push_all(*self.args.last().unwrap());
+            res.push_all(self.args.last().unwrap().as_slice());
         }
         res
     }
@@ -811,7 +812,7 @@ mod tests {
     #[test]
     fn parse_line() {
         macro_rules! b(
-            ($val:expr) => (bytes!($val).to_owned())
+            ($val:expr) => (Vec::from_slice(bytes!($val)))
         )
         macro_rules! t(
             ($v:expr, Some($exp:expr)) => (
@@ -827,60 +828,60 @@ mod tests {
                 assert_eq!(line.command, exp.command);
                 assert_eq!(line.args, exp.args);
                 let line = line.to_raw();
-                assert_eq!(line, $res);
+                assert_eq!(line.as_slice(), $res);
             });
             ($s:expr, None) => (
                 assert_eq!(Line::parse($s), None);
             )
         )
-        t!(b!(":sendak.freenode.net 001 asldfkj :Welcome to the freenode Internet \
+        t!(bytes!(":sendak.freenode.net 001 asldfkj :Welcome to the freenode Internet \
             Relay Chat Network asldfkj"),
             Some(Line{
-                prefix: Some(User::parse(b!("sendak.freenode.net"))),
+                prefix: Some(User::parse(bytes!("sendak.freenode.net"))),
                 command: IRCCode(1),
-                args: ~[b!("asldfkj"),
-                        b!("Welcome to the freenode Internet Relay Chat Network asldfkj")]
+                args: vec![b!("asldfkj"),
+                           b!("Welcome to the freenode Internet Relay Chat Network asldfkj")]
             }));
-        t!(b!("004 asdf :This is a test"),
+        t!(bytes!("004 asdf :This is a test"),
             Some(Line{
                 prefix: None,
                 command: IRCCode(4),
-                args: ~[b!("asdf"), b!("This is a test")]
+                args: vec![b!("asdf"), b!("This is a test")]
             }));
-        t!(b!(":nick!user@host.com PRIVMSG #channel :Some message"),
+        t!(bytes!(":nick!user@host.com PRIVMSG #channel :Some message"),
             Some(Line{
-                prefix: Some(User::parse(b!("nick!user@host.com"))),
+                prefix: Some(User::parse(bytes!("nick!user@host.com"))),
                 command: IRCCmd(~"PRIVMSG"),
-                args: ~[b!("#channel"), b!("Some message")]
+                args: vec![b!("#channel"), b!("Some message")]
             }));
-        t!(b!(" :sendak.freenode.net 001 asdf :Test"), None);
-        t!(b!(":sendak  001 asdf :Test"), None);
-        t!(b!("004"),
+        t!(bytes!(" :sendak.freenode.net 001 asdf :Test"), None);
+        t!(bytes!(":sendak  001 asdf :Test"), None);
+        t!(bytes!("004"),
             Some(Line{
                 prefix: None,
                 command: IRCCode(4),
-                args: ~[]
+                args: vec![]
             }));
-        t!(b!(":bob!user@host.com PRIVMSG #channel :\x01ACTION does some stuff"),
+        t!(bytes!(":bob!user@host.com PRIVMSG #channel :\x01ACTION does some stuff"),
             Some(Line{
-                prefix: Some(User::parse(b!("bob!user@host.com"))),
+                prefix: Some(User::parse(bytes!("bob!user@host.com"))),
                 command: IRCAction(b!("#channel")),
-                args: ~[b!("does some stuff")]
+                args: vec![b!("does some stuff")]
             }),
-            b!(":bob!user@host.com PRIVMSG #channel :\x01ACTION does some stuff\x01"));
-        t!(b!(":bob!user@host.com PRIVMSG #channel :\x01VERSION\x01"),
+            bytes!(":bob!user@host.com PRIVMSG #channel :\x01ACTION does some stuff\x01"));
+        t!(bytes!(":bob!user@host.com PRIVMSG #channel :\x01VERSION\x01"),
             Some(Line{
-                prefix: Some(User::parse(b!("bob!user@host.com"))),
+                prefix: Some(User::parse(bytes!("bob!user@host.com"))),
                 command: IRCCTCP(b!("VERSION"), b!("#channel")),
-                args: ~[]
+                args: vec![]
             }));
-        t!(b!(":bob NOTICE #frobnitz :\x01RESPONSE to whatever\x01"),
+        t!(bytes!(":bob NOTICE #frobnitz :\x01RESPONSE to whatever\x01"),
             Some(Line{
-                prefix: Some(User::parse(b!("bob"))),
+                prefix: Some(User::parse(bytes!("bob"))),
                 command: IRCCTCPReply(b!("RESPONSE"), b!("#frobnitz")),
-                args: ~[b!("to whatever")]
+                args: vec![b!("to whatever")]
             }));
-        t!(b!(":bob föo"), None);
-        t!(b!(":bob f23"), None);
+        t!(bytes!(":bob föo"), None);
+        t!(bytes!(":bob f23"), None);
     }
 }

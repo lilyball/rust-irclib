@@ -29,14 +29,14 @@ mod handshake {
     pub fn RPL_WELCOME(conn: &mut Conn, line: &Line) {
         conn.logged_in = true;
         if !line.args.is_empty() {
-            conn.user = conn.user.with_nick(line.args[0]);
+            conn.user = conn.user.with_nick(line.args.get(0).as_slice());
         }
     }
 
     // 433
     pub fn ERR_NICKNAMEINUSE(conn: &mut Conn, line: &Line) {
         if !line.args.is_empty() {
-            let nick = line.args[0].as_slice();
+            let nick = line.args.get(0).as_slice();
             if nick == conn.user.nick() {
                 conn.set_nick(nick + bytes!("_"));
                 return;
@@ -64,13 +64,13 @@ mod handshake {
     fn bad_nick(conn: &mut Conn, line: &Line) {
         let mut nick;
         if !line.args.is_empty() {
-            nick = line.args[0].clone();
+            nick = line.args.get(0).clone();
         } else {
-            nick = conn.user.nick().to_owned();
+            nick = Vec::from_slice(conn.user.nick());
         }
 
         let mut modified = false;
-        for b in nick.mut_rev_iter() {
+        for b in nick.mut_iter().rev() {
             if *b != '_' as u8 {
                 *b = '_' as u8;
                 modified = true;
@@ -78,7 +78,7 @@ mod handshake {
             }
         }
         if modified {
-            conn.set_nick(nick);
+            conn.set_nick(nick.as_slice());
         } else {
             conn.quit([]);
         }
@@ -89,7 +89,7 @@ mod normal {
     use conn::{IRCCmd, Conn, Line};
 
     pub fn PING(conn: &mut Conn, line: &Line) {
-        conn.send_command(IRCCmd(~"PONG"), line.args, false);
+        conn.send_command(IRCCmd(~"PONG"), line.args.as_slice(), false);
     }
 
     pub fn NICK(conn: &mut Conn, line: &Line) {
@@ -100,7 +100,7 @@ mod normal {
         match line.prefix {
             Some(ref user) => {
                 if user.nick() == conn.user.nick() {
-                    conn.user = conn.user.with_nick(line.args[0]);
+                    conn.user = conn.user.with_nick(line.args.get(0).as_slice());
                 }
             }
             None => ()

@@ -1,4 +1,4 @@
-LIBNAME := $(shell rustc --crate-file-name lib.rs)
+LIBNAME := $(shell rustc --crate-file-name src/lib.rs)
 
 .PHONY: all lib clean test example help
 
@@ -16,16 +16,15 @@ lib: $(LIBNAME)
 
 all: lib example doc
 
-.INTERMEDIATE: .lib.d.tmp
 $(LIBNAME):
-	rustc -O lib.rs
+	rustc -O src/lib.rs
 
-include lib.d
+include mk/lib.d
 
-lib.d:
-	rustc --dep-info .lib.d --no-analysis lib.rs
-	@sed -n -e 'p;s/lib.*:/doc:/p;s/doc:/lib.d:/p' .lib.d > .lib.d~
-	@mv -f .lib.d~ lib.d
+mk/lib.d:
+	@trap 'rm -f .lib.d' ERR; \
+		rustc --dep-info .lib.d --no-analysis src/lib.rs
+	@sed -n -e 'p;s,^lib.*:,doc:,p;s,^doc:,mk/lib.d:,p' .lib.d > $@
 	@rm -f .lib.d
 
 example: ircbot
@@ -34,7 +33,7 @@ ircbot: example/example.rs $(LIBNAME)
 	rustc -L . -O $<
 
 doc:
-	rustdoc lib.rs
+	rustdoc src/lib.rs
 	@touch doc
 
 clean:
@@ -45,12 +44,12 @@ test: test-irc
 	env RUST_THREADS=1 ./test-irc $(TESTNAME)
 
 test-irc:
-	rustc -O --test -o test-irc lib.rs
+	rustc -O --test -o test-irc src/lib.rs
 
-include test.d
+include mk/test.d
 
-test.d:
-	rustc --dep-info .test.d --no-analysis -o test-irc --test lib.rs
-	@sed -n -e 'p;s/^test-irc:/test.d:/p' .test.d > .test.d~
-	@mv -f .test.d~ test.d
+mk/test.d:
+	@trap 'rm -f .test.d' ERR; \
+		rustc --dep-info .test.d --no-analysis -o test-irc --test src/lib.rs
+	@sed -n -e 'p;s,^test-irc:,mk/test.d:,p' .test.d > $@
 	@rm -f .test.d

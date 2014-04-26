@@ -2,6 +2,8 @@ LIBNAME := $(shell rustc --crate-file-name src/lib.rs)
 
 .PHONY: all lib clean test example help
 
+lib: $(LIBNAME)
+
 help: ;
 	@echo "Makefile targets:"
 	@echo "  help"
@@ -11,8 +13,6 @@ help: ;
 	@echo "  doc"
 	@echo "  test"
 	@echo "  clean"
-
-lib: $(LIBNAME)
 
 all: lib example doc
 

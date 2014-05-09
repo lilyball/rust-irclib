@@ -51,7 +51,8 @@ fn handler(conn: &mut Conn, event: Event) {
                             return;
                         }
                         if args.is_empty() {
-                            let line = Line{command: IRCCmd(~"JOIN"), args: args, prefix: Some(prefix)};
+                            let line = Line{command: IRCCmd("JOIN".into_maybe_owned()),
+                                            args: args, prefix: Some(prefix)};
                             println!("ERROR: Invalid JOIN message received: {}", line_desc(&line));
                             return;
                         }

@@ -8,6 +8,7 @@ use std::io::net::ip::SocketAddr;
 use std::io::BufferedStream;
 use std::{char,str,uint};
 use std::slice::MutableCloneableVector;
+use std::str::MaybeOwned;
 use std::cmp::min;
 use std::comm;
 use std::task::TaskBuilder;
@@ -237,8 +238,8 @@ impl<'a> Conn<'a> {
         }
 
         // send handshake commands
-        self.send_command(IRCCmd(~"NICK"), [opts.nick.as_bytes()], false);
-        self.send_command(IRCCmd(~"USER"), [opts.user.as_bytes(), bytes!("8 *"),
+        self.send_command(IRCCmd("NICK".into_maybe_owned()), [opts.nick.as_bytes()], false);
+        self.send_command(IRCCmd("USER".into_maybe_owned()), [opts.user.as_bytes(), bytes!("8 *"),
                           opts.real.as_bytes()], true);
 
 
@@ -396,7 +397,7 @@ impl<'a> Conn<'a> {
                 let is_ctcp = cmd.is_ctcp();
                 match cmd {
                     IRCCmd(cmd) => {
-                        append(&mut buf, cmd.as_bytes());
+                        append(&mut buf, cmd.as_slice().as_bytes());
                     }
                     IRCCode(code) => {
                         uint::to_str_bytes(code, 10, |v| {
@@ -470,7 +471,7 @@ impl<'a> Conn<'a> {
 
     /// Sets the user's nickname.
     pub fn set_nick(&mut self, nick: &[u8]) {
-        self.send_command(IRCCmd(~"NICK"), [nick], false);
+        self.send_command(IRCCmd("NICK".into_maybe_owned()), [nick], false);
         // if we're logged in, watch for the NICK reply before changing our nick
         if !self.logged_in {
             self.user = self.user.with_nick(nick);
@@ -482,30 +483,33 @@ impl<'a> Conn<'a> {
     pub fn quit(&mut self, msg: &[u8]) {
         if msg.is_empty() {
             let args: &[&[u8]] = [];
-            self.send_command(IRCCmd(~"QUIT"), args, false);
+            self.send_command(IRCCmd("QUIT".into_maybe_owned()), args, false);
         } else {
-            self.send_command(IRCCmd(~"QUIT"), [msg], true);
+            self.send_command(IRCCmd("QUIT".into_maybe_owned()), [msg], true);
         }
     }
 
     /// Sends a PRIVMSG
     pub fn privmsg(&mut self, dst: &[u8], msg: &[u8]) {
         // NB: .as_slice() calls are necessary to work around mozilla/rust#8874
-        self.send_command(IRCCmd(~"PRIVMSG"), [dst.as_slice(), msg.as_slice()], true)
+        self.send_command(IRCCmd("PRIVMSG".into_maybe_owned()),
+                          [dst.as_slice(), msg.as_slice()], true)
     }
 
     /// Sends a NOTICE
     pub fn notice(&mut self, dst: &[u8], msg: &[u8]) {
-        self.send_command(IRCCmd(~"NOTICE"), [dst.as_slice(), msg.as_slice()], true)
+        self.send_command(IRCCmd("NOTICE".into_maybe_owned()),
+                          [dst.as_slice(), msg.as_slice()], true)
     }
 
     /// Sends a JOIN
     /// Pass [] for keys if there are none.
     pub fn join(&mut self, room: &[u8], keys: &[u8]) {
         if keys.is_empty() {
-            self.send_command(IRCCmd(~"JOIN"), [room], false);
+            self.send_command(IRCCmd("JOIN".into_maybe_owned()), [room], false);
         } else {
-            self.send_command(IRCCmd(~"JOIN"), [room.as_slice(), keys.as_slice()], false);
+            self.send_command(IRCCmd("JOIN".into_maybe_owned()),
+                              [room.as_slice(), keys.as_slice()], false);
         }
     }
 
@@ -513,9 +517,10 @@ impl<'a> Conn<'a> {
     /// Pass [] for the message to use the default.
     pub fn part(&mut self, room: &[u8], msg: &[u8]) {
         if msg.is_empty() {
-            self.send_command(IRCCmd(~"PART"), [room], false);
+            self.send_command(IRCCmd("PART".into_maybe_owned()), [room], false);
         } else {
-            self.send_command(IRCCmd(~"PART"), [room.as_slice(), msg.as_slice()], true);
+            self.send_command(IRCCmd("PART".into_maybe_owned()),
+                              [room.as_slice(), msg.as_slice()], true);
         }
     }
 }
@@ -548,7 +553,7 @@ fn chomp<'a>(s: &'a [u8]) -> &'a [u8] {
 #[deriving(Eq,Clone)]
 pub enum Command {
     /// An IRC command
-    IRCCmd(~str),
+    IRCCmd(MaybeOwned<'static>),
     /// A 3-digit command code
     IRCCode(uint),
     /// CTCP actions. The first arg is the destination
@@ -564,8 +569,7 @@ impl Command {
     pub fn is_ctcp(&self) -> bool {
         match *self {
             IRCAction(_) | IRCCTCP(_,_) | IRCCTCPReply(_,_) => true,
-            _ => false
-        }
+            _ => false }
     }
 }
 
@@ -642,7 +646,7 @@ impl Line {
                 (IRCCode(uint::parse_bytes(cmd, 10).unwrap()), false)
             } else if cmd.iter().all(|&b| b < 0x80 && char::is_alphabetic(b as char)) {
                 let shouldCheck = cmd == bytes!("PRIVMSG") || cmd == bytes!("NOTICE");
-                (IRCCmd(str::from_utf8(cmd).unwrap().to_owned()), shouldCheck)
+                (IRCCmd(str::from_utf8(cmd).unwrap().to_owned().into_maybe_owned()), shouldCheck)
             } else {
                 return None;
             }
@@ -683,8 +687,8 @@ impl Line {
                 }
             }
             let cmdstr = match command {
-                IRCCmd(ref s) if "PRIVMSG" == *s => "PRIVMSG",
-                IRCCmd(ref s) if "NOTICE" == *s => "NOTICE",
+                IRCCmd(ref s) if "PRIVMSG" == s.as_slice() => "PRIVMSG",
+                IRCCmd(ref s) if "NOTICE" == s.as_slice() => "NOTICE",
                 _ => unreachable!()
             };
             match cmdstr {
@@ -754,7 +758,7 @@ impl Line {
             res.push(' ' as u8);
         }
         match self.command {
-            IRCCmd(ref cmd) => res.push_all(cmd.as_bytes()),
+            IRCCmd(ref cmd) => res.push_all(cmd.as_slice().as_bytes()),
             IRCCode(c) => {
                 uint::to_str_bytes(c, 10, |v| {
                     for _ in range(0, 3 - min(v.len(), 3)) {
@@ -851,7 +855,7 @@ mod tests {
         t!(bytes!(":nick!user@host.com PRIVMSG #channel :Some message"),
             Some(Line{
                 prefix: Some(User::parse(bytes!("nick!user@host.com"))),
-                command: IRCCmd(~"PRIVMSG"),
+                command: IRCCmd("PRIVMSG".into_maybe_owned()),
                 args: vec![b!("#channel"), b!("Some message")]
             }));
         t!(bytes!(" :sendak.freenode.net 001 asdf :Test"), None);

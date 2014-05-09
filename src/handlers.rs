@@ -10,13 +10,13 @@ pub fn handle_line(conn: &mut Conn, line: &Line) {
             IRCCode(432) => handshake::ERR_ERRONEUSNICKNAME(conn, line),
             IRCCode(436) => handshake::ERR_NICKCOLLISION(conn, line),
             IRCCode(437) => handshake::ERR_UNAVAILRESOURCE(conn, line),
-            IRCCmd(ref s) if "PING" == *s => normal::PING(conn, line),
+            IRCCmd(ref s) if "PING" == s.as_slice() => normal::PING(conn, line),
             _ => ()
         }
     } else {
         match line.command {
-            IRCCmd(ref s) if "PING" == *s => normal::PING(conn, line),
-            IRCCmd(ref s) if "NICK" == *s => normal::NICK(conn, line),
+            IRCCmd(ref s) if "PING" == s.as_slice() => normal::PING(conn, line),
+            IRCCmd(ref s) if "NICK" == s.as_slice() => normal::NICK(conn, line),
             _ => ()
         }
     }
@@ -89,7 +89,7 @@ mod normal {
     use conn::{IRCCmd, Conn, Line};
 
     pub fn PING(conn: &mut Conn, line: &Line) {
-        conn.send_command(IRCCmd(~"PONG"), line.args.as_slice(), false);
+        conn.send_command(IRCCmd("PONG".into_maybe_owned()), line.args.as_slice(), false);
     }
 
     pub fn NICK(conn: &mut Conn, line: &Line) {

@@ -133,11 +133,11 @@ fn handle_privmsg(conn: &mut Conn, msg: &[u8], src: &[u8], dst: &[u8]) {
     match msgtype {
         DirectedMessage => {
             let reply = if dst == conn.me().nick() { src } else { dst };
-            let msg = src + bytes!(": Hello");
-            conn.privmsg(reply, msg);
+            let msg = Vec::from_slice(src).append(bytes!(": Hello"));
+            conn.privmsg(reply, msg.as_slice());
             let src = str::from_utf8(conn.me().nick()).unwrap_or("(invalid utf8)");
             let reply = str::from_utf8(reply).unwrap_or("(invalid utf8)");
-            let msg = str::from_utf8(msg).unwrap_or("(invalid utf8)");
+            let msg = StrBuf::from_utf8(msg).unwrap_or_handle(|_| "(invalid utf8)".to_strbuf());
             println!("--> PRIVMSG({}) {}: {}", reply, src, msg);
         }
         CommandMessage(cmd) if cmd == bytes!("quit") => {

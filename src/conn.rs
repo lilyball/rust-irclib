@@ -2,9 +2,7 @@
 
 use std::fmt;
 use std::io;
-use std::io::{IoError, IoResult, TcpStream, IpAddr};
-use std::io::net::addrinfo;
-use std::io::net::ip::SocketAddr;
+use std::io::{IoError, IoResult, TcpStream};
 use std::io::BufferedStream;
 use std::{char,str,uint};
 use std::slice::MutableCloneableVector;
@@ -23,27 +21,10 @@ mod handlers;
 /// extra data for your handler to use. It is completely ignored by this
 /// library otherwise.
 pub struct Conn<'a> {
-    host: OptionsHost<'a>,
+    host: &'a str,
     write_tx: Option<Sender<~[u8]>>,
     logged_in: bool,
     user: User,
-}
-
-/// OptionsHost allows for using an IP address or a host string
-pub enum OptionsHost<'a> {
-    /// Host string
-    Host(&'a str),
-    /// IP address
-    Addr(IpAddr)
-}
-
-impl<'a> fmt::Show for OptionsHost<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            Host(s) => f.pad(s),
-            Addr(ref ip) => f.pad(ip.to_str())
-        }
-    }
 }
 
 /// Options used with Conn for connecting to the server.
@@ -52,7 +33,7 @@ impl<'a> fmt::Show for OptionsHost<'a> {
 /// It's needed here for the commands channel.
 pub struct Options<'a, Payload=()> {
     /// The server host to connect to
-    pub host: OptionsHost<'a>,
+    pub host: &'a str,
     /// The server port to connect to
     pub port: u16,
     /// The nickname to use
@@ -78,7 +59,7 @@ impl<'a, Payload> Options<'a, Payload> {
     pub fn new(host: &'a str, port: u16) -> Options<'a, Payload> {
         #![inline]
         Options {
-            host: Host(host),
+            host: host,
             port: port,
             nick: "ircnick",
             user: "ircuser",
@@ -105,8 +86,6 @@ pub enum Event {
 
 /// Errors that can be returned from connect()
 pub enum Error {
-    /// Error resolving host address
-    ErrResolve(IoError),
     /// Error connecting to server
     ErrConnect(IoError),
     /// I/O error raised while connection is active
@@ -116,8 +95,7 @@ pub enum Error {
 impl fmt::Show for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            ErrResolve(ref err) => { write!(f.buf, "resolve error: {}", *err) }
-            ErrConnect(ref err) => { write!(f.buf, "connect error: {}", *err) }
+            ErrConnect(ref err) => { write!(f, "connect error: {}", *err) }
             ErrIO(ref err) => err.fmt(f)
         }
     }
@@ -139,24 +117,7 @@ pub static DefaultPort: u16 = 6667;
 /// Note: If your Conn has no payload, you should pass () as the payload parameter.
 pub fn connect<Payload>(opts: Options<Payload>, mut payload: Payload,
                         cb: |&mut Conn, Event, &mut Payload|) -> Result {
-    let addr = {
-        match opts.host {
-            Addr(x) => x,
-            Host(host) => {
-                match addrinfo::get_host_addresses(host) {
-                    Err(e) => return Err(ErrResolve(e)),
-                    Ok(v) => if v.len() >= 1 {
-                        v[0]
-                    } else {
-                        fail!("addrinfo returned 0 addresses")
-                    }
-                }
-            }
-        }
-    };
-    let addr = SocketAddr{ ip: addr, port: opts.port };
-
-    let stream = match TcpStream::connect(addr) {
+    let stream = match TcpStream::connect(opts.host, opts.port) {
         Err(e) => return Err(ErrConnect(e)),
         Ok(stream) => stream
     };
@@ -352,7 +313,7 @@ impl<'a> Conn<'a> {
     }
 
     /// Returns the host that was used to create this Conn
-    pub fn host(&self) -> OptionsHost<'a> {
+    pub fn host(&self) -> &'a str {
         self.host
     }
 
@@ -391,7 +352,7 @@ impl<'a> Conn<'a> {
                     // this should work:
                     //   *buf = buf.mut_slice_from(len);
                     // but I'm getting weird borrowck issues (see mozilla/rust#11361)
-                    *buf = unsafe { ::std::cast::transmute(buf.mut_slice_from(len)) };
+                    *buf = unsafe { ::std::mem::transmute(buf.mut_slice_from(len)) };
                 }
 
                 let is_ctcp = cmd.is_ctcp();
@@ -576,18 +537,18 @@ impl Command {
 impl fmt::Show for Command {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            IRCCmd(ref s) => write!(f.buf, "IRCCmd({})", *s),
-            IRCCode(code) => write!(f.buf, "IRCCode({})", code),
-            IRCAction(ref v) => write!(f.buf, "IRCAction({})", str::from_utf8_lossy(v.as_slice())),
+            IRCCmd(ref s) => write!(f, "IRCCmd({})", *s),
+            IRCCode(code) => write!(f, "IRCCode({})", code),
+            IRCAction(ref v) => write!(f, "IRCAction({})", str::from_utf8_lossy(v.as_slice())),
             IRCCTCP(ref cmd, ref dst) => {
                 let cmd = str::from_utf8_lossy(cmd.as_slice());
                 let dst = str::from_utf8_lossy(dst.as_slice());
-                write!(f.buf, "IRCCTCP({}, {})", cmd, dst)
+                write!(f, "IRCCTCP({}, {})", cmd, dst)
             }
             IRCCTCPReply(ref cmd, ref dst) => {
                 let cmd = str::from_utf8_lossy(cmd.as_slice());
                 let dst = str::from_utf8_lossy(dst.as_slice());
-                write!(f.buf, "IRCCTCPReply({}, {})", cmd, dst)
+                write!(f, "IRCCTCPReply({}, {})", cmd, dst)
             }
         }
     }
@@ -606,14 +567,14 @@ pub struct Line {
 
 impl fmt::Show for Line {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        try!(write!(f.buf, r"Line\{ prefix: {}, command: {}, args: [", self.prefix, self.command));
+        try!(write!(f, r"Line\{ prefix: {}, command: {}, args: [", self.prefix, self.command));
         for (i, v) in self.args.iter().enumerate() {
             if i != 0 {
-                try!(write!(f.buf, ", "));
+                try!(write!(f, ", "));
             }
-            try!(write!(f.buf, "{}", str::from_utf8_lossy(v.as_slice())));
+            try!(write!(f, "{}", str::from_utf8_lossy(v.as_slice())));
         }
-        write!(f.buf, "]")
+        write!(f, "]")
     }
 }
 

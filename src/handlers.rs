@@ -38,7 +38,7 @@ mod handshake {
         if !line.args.is_empty() {
             let nick = line.args.get(0).as_slice();
             if nick == conn.user.nick() {
-                conn.set_nick(nick + bytes!("_"));
+                conn.set_nick(Vec::from_slice(nick).append(['_' as u8]).as_slice());
                 return;
             }
         }

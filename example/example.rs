@@ -137,7 +137,7 @@ fn handle_privmsg(conn: &mut Conn, msg: &[u8], src: &[u8], dst: &[u8]) {
             conn.privmsg(reply, msg.as_slice());
             let src = str::from_utf8(conn.me().nick()).unwrap_or("(invalid utf8)");
             let reply = str::from_utf8(reply).unwrap_or("(invalid utf8)");
-            let msg = StrBuf::from_utf8(msg).unwrap_or_else(|_| "(invalid utf8)".to_strbuf());
+            let msg = String::from_utf8(msg).unwrap_or_else(|_| "(invalid utf8)".to_strbuf());
             println!("--> PRIVMSG({}) {}: {}", reply, src, msg);
         }
         CommandMessage(cmd) if cmd == bytes!("quit") => {
@@ -148,7 +148,7 @@ fn handle_privmsg(conn: &mut Conn, msg: &[u8], src: &[u8], dst: &[u8]) {
     }
 }
 
-fn line_desc(line: &Line) -> StrBuf {
+fn line_desc(line: &Line) -> String {
     let raw = line.to_raw();
     str::from_utf8_lossy(raw.as_slice()).into_owned()
 }
